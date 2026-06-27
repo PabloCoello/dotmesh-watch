@@ -33,15 +33,38 @@ make sideload-approver GARMIN_DIR=/ruta/GARMIN   # al reloj
 
 ## Configurar (sin secretos en el repo)
 
-Los topics y el token van en los **App Settings** (Garmin Connect Mobile → la app →
-Configuración), no en el código:
+La app lee la config de **Properties** (`baseUrl`, `decTopic`, `repTopic`, `token`).
+El fichero `resources/settings/properties.xml` está **gitignorado**; se versiona solo
+`properties.xml.example`. Tu topic real vive en tu copia local, nunca en el repo
+(igual que `approver/.env`).
 
-- **Base ntfy** — raíz con barra final. Por defecto `https://ntfy.sh/`.
-- **Topic DEC** — tu `BRIDGE_TOPIC_DEC` (el del `.env` del host).
-- **Topic REP** — tu `BRIDGE_TOPIC_REPROMPT`.
-- **Token** — vacío en ntfy.sh; solo para self-host con auth.
+> ⚠️ **Limitación conocida (sideload).** Editar estos valores desde **Garmin Connect
+> Mobile → App Settings NO es fiable con una app *sideloadeada*** (no publicada en la
+> store): GCM saca el descriptor de settings del servidor de la store, no del reloj, y
+> puede **reiniciar el reloj**. Es un *watchdog reset*, no daña nada, pero **no abras
+> esa pantalla** en un build sideloadeado. Configura por el fichero local (abajo).
 
-En el simulador se ponen en *Settings → Edit Persistent Storage / App Settings*.
+### Build local con tu topic (recomendado al sideloadear)
+
+```bash
+cp bridge/watchapp/resources/settings/properties.xml.example \
+   bridge/watchapp/resources/settings/properties.xml
+$EDITOR bridge/watchapp/resources/settings/properties.xml   # pega decTopic/repTopic
+make build-approver
+make sideload-approver GARMIN_DIR=/ruta/GARMIN
+```
+
+- **baseUrl** — raíz con barra final. Por defecto `https://ntfy.sh/`.
+- **decTopic** — tu `BRIDGE_TOPIC_DEC` (el del `.env` del host).
+- **repTopic** — tu `BRIDGE_TOPIC_REPROMPT`.
+- **token** — vacío en ntfy.sh; solo para self-host con auth.
+
+> El default de una property **solo se aplica si la property aún no existe** en el
+> reloj. Si antes abriste los settings en GCM (que pudo crearlas vacías), **borra la
+> app y reinstálala** una vez para que el reloj tome los valores nuevos.
+
+Cuando la **publiques en la store** (canal beta), los App Settings de GCM sí
+funcionan y configuras desde el móvil sin tocar el build.
 
 ## Uso
 
