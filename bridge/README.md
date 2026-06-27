@@ -72,12 +72,15 @@ bridge/
    }
    ```
 
-## Lado móvil / reloj (pendiente)
+## Lado móvil / reloj
 
-- App **ntfy** en el móvil suscrita a los dos topics; botones de acción para
-  aprobar/denegar desde la notificación.
-- **Tasker** + Connect IQ **Tasker Trigger**: un botón del Garmin dispara una
-  tarea que publica `"<id> allow"` o `"<id> deny"` en el topic de decisiones.
+Guía paso a paso completa en [`SETUP.md`](SETUP.md). En corto:
+
+- App **ntfy** en el móvil suscrita a los dos topics; el push lleva botones
+  **Aprobar/Denegar** que publican `"<id> allow|deny"` en el topic DEC de un toque.
+- **Tasker** + Connect IQ **Tasker Trigger**: una entrada del Garmin dispara una
+  tarea que publica un `allow`/`deny` "pelado" en el topic DEC (el hook lo acepta
+  igual; vale con una petición pendiente por par de topics).
 
 ## Seguridad
 
@@ -90,6 +93,7 @@ bridge/
 
 ## Estado
 
-`approver/` con el hook `PreToolUse` y su test (verde). Pendiente: verificar en el
-equipo del usuario (que `deny` funciona en bypass), cablear Tasker/Garmin y el
-hook `Stop` de reprompt. Plan en `.ai/tasks/2026-06-27-bridge/plan.md`.
+`approver/` con el hook `PreToolUse`, botones de aprobación en el push y test
+(verde). Guía de montaje en [`SETUP.md`](SETUP.md). Pendiente: verificar en el
+equipo del usuario (que `deny` funciona en bypass), montar Tasker/Garmin y el hook
+`Stop` de reprompt. Plan en `.ai/tasks/2026-06-27-bridge/plan.md`.

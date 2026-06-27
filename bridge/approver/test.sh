@@ -51,5 +51,28 @@ long=$(printf 'a%.0s' {1..400})
 bridge_decide >/dev/null <<<"{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"$long\"}}"
 [ "${#PUBLISHED_BODY}" -le 200 ] && printf 'ok   Bash recorta a ≤200\n' || { printf 'FAIL Bash no recorta (%s)\n' "${#PUBLISHED_BODY}"; fails=$((fails+1)); }
 
+# Matching de decisiones: correlacionado por id y pelado; basura no casa.
+check "match <id> allow" allow "$(bridge_match abc 'abc allow')"
+check "match <id> deny"  deny  "$(bridge_match abc 'abc deny')"
+check "match allow pelado" allow "$(bridge_match abc allow)"
+check "match deny pelado"  deny  "$(bridge_match abc deny)"
+check "match otro id"      ""    "$(bridge_match abc 'xyz allow')"
+check "match basura"       ""    "$(bridge_match abc 'lolnope')"
+
+# bridge_actions: cabecera con ambos botones, decisión correlacionada y topic DEC.
+BRIDGE_NTFY_BASE=https://ntfy.sh BRIDGE_TOPIC_DEC=dec123 BRIDGE_TOKEN="" acts=$(bridge_actions ABC)
+case "$acts" in
+  *Aprobar*Denegar*) printf 'ok   actions: ambos botones\n' ;;
+  *) printf 'FAIL actions sin botones [%s]\n' "$acts"; fails=$((fails+1)) ;;
+esac
+case "$acts" in
+  *dec123*"ABC allow"*"ABC deny"*) printf 'ok   actions: id+topic correctos\n' ;;
+  *) printf 'FAIL actions mal formada [%s]\n' "$acts"; fails=$((fails+1)) ;;
+esac
+# Con token, la cabecera incluye Authorization; sin token, no.
+acts_tok=$(BRIDGE_NTFY_BASE=https://ntfy.sh BRIDGE_TOPIC_DEC=dec123 BRIDGE_TOKEN=secreto bridge_actions ABC)
+case "$acts_tok" in *Bearer*secreto*) printf 'ok   actions: token cuando hay\n' ;; *) printf 'FAIL actions sin token\n'; fails=$((fails+1)) ;; esac
+case "$acts" in *Authorization*) printf 'FAIL actions con auth sin token\n'; fails=$((fails+1)) ;; *) printf 'ok   actions: sin auth si no hay token\n' ;; esac
+
 echo "---"
 if [ "$fails" -eq 0 ]; then echo "todos los tests OK"; else echo "$fails test(s) fallidos"; exit 1; fi

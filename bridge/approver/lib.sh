@@ -34,6 +34,15 @@ bridge_summary() {
   esac
 }
 
+# Cabecera Actions de ntfy: dos botones que publican la decisión correlacionada
+# en el topic DEC (aprobar/denegar de un toque desde la notificación). $1=id
+bridge_actions() {
+  local id="$1" url="$BRIDGE_NTFY_BASE/$BRIDGE_TOPIC_DEC" auth=""
+  [ -n "${BRIDGE_TOKEN:-}" ] && auth=", headers.Authorization='Bearer $BRIDGE_TOKEN'"
+  printf "http, Aprobar, %s, method=POST, body='%s allow', clear=true%s; http, Denegar, %s, method=POST, body='%s deny', clear=true%s" \
+    "$url" "$id" "$auth" "$url" "$id" "$auth"
+}
+
 # Publica el push de petición. $1=id $2=título $3=cuerpo
 bridge_publish() {
   local id="$1" title="$2" body="$3"
@@ -42,14 +51,27 @@ bridge_publish() {
     -H "Title: $title" \
     -H "Tags: warning" \
     -H "X-Request-Id: $id" \
+    -H "Actions: $(bridge_actions "$id")" \
     -d "$body" \
     "$BRIDGE_NTFY_BASE/$BRIDGE_TOPIC_REQ" >/dev/null
+}
+
+# Clasifica un mensaje del topic DEC. $1=id $2=mensaje -> "allow" | "deny" | "".
+# Acepta la forma correlacionada ("<id> allow", la usan los botones del push) y
+# la pelada ("allow", la usa la tarea estática de Tasker desde el reloj: vale
+# con una petición pendiente por par de topics; ver SETUP.md).
+bridge_match() {
+  case "$2" in
+    "$1 allow"|"$1 approve"|allow|approve) printf allow ;;
+    "$1 deny"|"$1 reject"|deny|reject)     printf deny  ;;
+    *) : ;;
+  esac
 }
 
 # Espera la decisión del id. Imprime "allow" o "deny"; vacío si timeout.
 # $1=id  $2=since (unix ts)
 bridge_wait_decision() {
-  local id="$1" since="${2:-all}" line ev msg
+  local id="$1" since="${2:-all}" line ev msg m
   curl -fsS --no-buffer --max-time "$BRIDGE_TIMEOUT" \
     ${BRIDGE_TOKEN:+-H "Authorization: Bearer $BRIDGE_TOKEN"} \
     "$BRIDGE_NTFY_BASE/$BRIDGE_TOPIC_DEC/json?since=$since" 2>/dev/null | \
@@ -58,10 +80,8 @@ bridge_wait_decision() {
     ev=$(jq -r '.event // empty' <<<"$line" 2>/dev/null) || continue
     [ "$ev" = "message" ] || continue
     msg=$(jq -r '.message // empty' <<<"$line" 2>/dev/null)
-    case "$msg" in
-      "$id allow"|"$id approve") echo allow; break ;;
-      "$id deny"|"$id reject")   echo deny;  break ;;
-    esac
+    m=$(bridge_match "$id" "$msg")
+    [ -n "$m" ] && { echo "$m"; break; }
   done
 }
 
