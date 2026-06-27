@@ -1,40 +1,95 @@
 # bridge — aprobar Claude desde la muñeca
 
-Cómo convertir una pulsación en el Garmin en un "sí/no" a un permiso de Claude
-Code, sin sacar el móvil. Es **independiente de la esfera**: la esfera puede
-mostrar el estado, pero quien actúa es este puente.
+Convierte una pulsación en el Garmin en un "sí/no" a un permiso de Claude Code, y
+en un reprompt cuando una tarea termina, sin sacar el móvil. Es **independiente de
+la esfera**: la esfera puede mostrar estado, pero quien actúa es este puente.
 
-## Arquitectura
+## Cómo funciona
+
+Sobre el mecanismo **nativo** de Claude Code: los **hooks**. Nada de parchear la
+CLI ni de approvers de terceros.
 
 ```
-permiso de Claude ──push──▶ móvil ──▶ Garmin (vibra, lo lees)
-        ▲                                  │
-        │                            pulsas Aprobar/Denegar
-   HTTP approve/deny                       │
-        │                                  ▼
-   approver (host) ◀── HTTP ── Tasker ◀── Tasker Trigger (Connect IQ)
+Claude (tool-use) ──PreToolUse hook (host)──┐ publica petición + resumen recortado
+   ▲                                          ▼
+   │ permissionDecision allow/deny      ntfy topic REQ ──push──▶ móvil ──▶ Garmin (vibra)
+   │                                                                          │ pulsas
+   └──── el hook lee la decisión ◀── ntfy topic DEC ◀── Tasker Trigger ◀──────┘
 ```
+
+- **Transporte: ntfy ida y vuelta.** El host publica la petición en un topic y
+  espera la decisión en otro. Sin puertos abiertos; funciona desde cualquier red.
+- **Dos hooks, un transporte:**
+  - `PreToolUse` → aprobar/denegar herramientas peligrosas desde la muñeca.
+  - `Stop` (pendiente) → avisar al terminar y aceptar un reprompt desde la muñeca.
+- **Funciona en bypass.** Los hooks se ejecutan aunque trabajes con permisos en
+  bypass (bypass se salta el diálogo, no los hooks), así que solo lo peligroso
+  para en el reloj.
+
+## Por qué hooks y no el flujo de terceros
+
+- `permissionPromptTool` está **sin documentar** (sin contrato estable).
+- El remote control oficial **no** expone webhook que Tasker pueda disparar.
+- `canUseTool` es solo del Agent SDK, no de la CLI interactiva.
+- `PreToolUse`/`Stop` tienen contrato documentado y estable. Ver
+  [docs de hooks](https://code.claude.com/docs/en/hooks.md).
 
 ## Piezas
 
-1. **Host (tu Linux)** — un *approver* tipo
-   [`claude-remote-approver`](https://github.com/yuuichieguchi/claude-remote-approver)
-   convierte cada permiso en un push (vía ntfy) **y** en una acción que se
-   dispara con una simple llamada HTTP.
-2. **Móvil (Android)** — **Tasker** + la app Connect IQ **Tasker Trigger**.
-   Mapeas entradas del reloj a nombres de tarea; al pulsar, el reloj avisa al
-   móvil y Tasker ejecuta esa tarea.
-3. **Tarea de Tasker** — hace el `HTTP Request` de aprobar (o denegar) contra el
-   approver. El reloj nunca habla con Claude directamente.
+```
+bridge/
+├── approver/                  # lado host (este repo)
+│   ├── lib.sh                 # transporte ntfy + emisión del JSON del hook
+│   ├── pretooluse-approve.sh  # hook PreToolUse (aprobar/denegar)
+│   ├── test.sh                # test local sin red
+│   └── .env.example           # config (copia a .env, fuera de git)
+└── tasker/                    # lado Android (pendiente): perfil Tasker exportado
+```
 
-## Por qué el approver de terceros y no el flujo nativo
+## Puesta en marcha (host)
 
-El control remoto oficial aprueba desde la app, sin webhook documentado que
-Tasker pueda disparar; además hay un bug conocido por el que aprobar desde el
-móvil a veces no libera el host. El approver por ntfy/HTTP es predecible y es
-justo lo que Tasker sabe llamar.
+1. **Config**: `cp approver/.env.example approver/.env` y rellena topics + token.
+   Genera topics con `openssl rand -hex 12`. `.env` está en `.gitignore`.
+2. **Requisitos**: `curl` y `jq`.
+3. **Test**: `bash approver/test.sh` (verde sin necesidad de red ni móvil).
+4. **Registra el hook** en `~/.claude/settings.json` (o el `.claude/settings.json`
+   del proyecto). Apunta al script por ruta absoluta:
+
+   ```json
+   {
+     "hooks": {
+       "PreToolUse": [
+         {
+           "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit",
+           "hooks": [
+             { "type": "command",
+               "command": "/ruta/a/dotmesh-watch/bridge/approver/pretooluse-approve.sh",
+               "timeout": 300 }
+           ]
+         }
+       ]
+     }
+   }
+   ```
+
+## Lado móvil / reloj (pendiente)
+
+- App **ntfy** en el móvil suscrita a los dos topics; botones de acción para
+  aprobar/denegar desde la notificación.
+- **Tasker** + Connect IQ **Tasker Trigger**: un botón del Garmin dispara una
+  tarea que publica `"<id> allow"` o `"<id> deny"` en el topic de decisiones.
+
+## Seguridad
+
+- Token y topics se cargan por `.env`, **nunca** al repo.
+- El push **no** lleva contenido de ficheros ni variables: `Bash` → comando
+  recortado; `Write`/`Edit` → solo la ruta.
+- Ante mala config o timeout, el hook devuelve `ask` (decides en el terminal),
+  nunca `allow` mudo.
+- Endurecimiento futuro: ntfy self-hosted (tras Tailscale), TTL del id, anti-replay.
 
 ## Estado
 
-Pendiente. Aquí irán los perfiles/tareas de Tasker exportados (`tasker/`) y el
-glue del host (`approver/`, o un README apuntando al proyecto upstream).
+`approver/` con el hook `PreToolUse` y su test (verde). Pendiente: verificar en el
+equipo del usuario (que `deny` funciona en bypass), cablear Tasker/Garmin y el
+hook `Stop` de reprompt. Plan en `.ai/tasks/2026-06-27-bridge/plan.md`.

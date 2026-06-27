@@ -15,3 +15,6 @@ developer_key*
 
 # Workspace de IA (scratch efímero; .ai/tasks/ lo decide el proyecto)
 .ai/tmp/
+
+# Secretos del bridge (token ntfy, topics) — fuera del repo
+bridge/approver/.env
