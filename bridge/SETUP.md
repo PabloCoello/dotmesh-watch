@@ -127,6 +127,36 @@ Usa algo inofensivo: si por lo que sea la base no frena, el comando se ejecutar�
 
 ---
 
+## Aviso al terminar + reprompt desde la muñeca (hook Stop)
+
+Recibe un push con el resumen final cuando Claude acaba, y respóndele desde el
+reloj para que continúe.
+
+**Importante (opt-in):** el hook `Stop` se dispara al final de **cada** turno, así
+que solo actúa si activas el modo reprompt. Si no, no molesta.
+
+1. **Topic de vuelta**: genera `BRIDGE_TOPIC_REPROMPT`
+   (`dotmesh-claude-rep-$(openssl rand -hex 12)`) y ponlo en `.env`.
+2. **Registra el hook `Stop`** en `settings.json` (sin matcher):
+   ```json
+   { "hooks": { "Stop": [ { "hooks": [
+     { "type": "command",
+       "command": "/home/problemas/Documentos/GitHub/dotmesh-watch/bridge/approver/stop-reprompt.sh",
+       "timeout": 320 } ] } ] } }
+   ```
+   (Pon `timeout` mayor que `BRIDGE_REPROMPT_TIMEOUT`.)
+3. **Activa/desactiva** cuando vayas a dejar algo corriendo:
+   ```bash
+   bridge/approver/reprompt.sh on    # … off / status
+   ```
+4. **Responder**: el push trae botones **Continúa / Tests / Commit** (publican un
+   reprompt fijo en el topic REPROMPT). Para **texto libre**, publica cualquier
+   mensaje a ese topic desde la app ntfy; ese texto es el reprompt. Desde el
+   Garmin, igual que las decisiones: una tarea de Tasker que hace POST del reprompt.
+
+Si respondes, Claude continúa con esa instrucción (`{"decision":"block"}`); si no
+respondes en `BRIDGE_REPROMPT_TIMEOUT`, para normal.
+
 ## Qué escala a la muñeca (y qué no)
 
 El hook **no** manda push por cada Bash/Write/Edit — eso sería insoportable en

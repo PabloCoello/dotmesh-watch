@@ -21,7 +21,8 @@ Claude (tool-use) ──PreToolUse hook (host)──┐ publica petición + resu
   espera la decisión en otro. Sin puertos abiertos; funciona desde cualquier red.
 - **Dos hooks, un transporte:**
   - `PreToolUse` → aprobar/denegar herramientas peligrosas desde la muñeca.
-  - `Stop` (pendiente) → avisar al terminar y aceptar un reprompt desde la muñeca.
+  - `Stop` → avisar al terminar con el resumen y aceptar un reprompt desde la
+    muñeca (opt-in por flag; ver `SETUP.md`).
 - **Funciona en bypass.** Los hooks se ejecutan aunque trabajes con permisos en
   bypass (bypass se salta el diálogo, no los hooks), así que solo lo peligroso
   para en el reloj.

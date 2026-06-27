@@ -93,5 +93,44 @@ acts_tok=$(BRIDGE_NTFY_BASE=https://ntfy.sh BRIDGE_TOPIC_DEC=dec123 BRIDGE_TOKEN
 case "$acts_tok" in *Bearer*secreto*) printf 'ok   actions: token cuando hay\n' ;; *) printf 'FAIL actions sin token\n'; fails=$((fails+1)) ;; esac
 case "$acts" in *Authorization*) printf 'FAIL actions con auth sin token\n'; fails=$((fails+1)) ;; *) printf 'ok   actions: sin auth si no hay token\n' ;; esac
 
+# ---- Hook Stop (reprompt) ----
+check "continue decision" block    "$(bridge_emit_continue 'haz X' | jq -r .decision)"
+check "continue reason"   'haz X'  "$(bridge_emit_continue 'haz X' | jq -r .reason)"
+
+ra=$(BRIDGE_NTFY_BASE=https://ntfy.sh BRIDGE_TOPIC_REPROMPT=rep1 BRIDGE_TOKEN="" bridge_reprompt_actions)
+case "$ra" in
+  *Continúa*Tests*Commit*rep1*) printf 'ok   reprompt: 3 botones + topic\n' ;;
+  *) printf 'FAIL reprompt actions [%s]\n' "$ra"; fails=$((fails+1)) ;;
+esac
+
+# Último mensaje del asistente del transcript (resumen final).
+tf=$(mktemp)
+printf '%s\n' \
+  '{"type":"user","message":{"content":"hola"}}' \
+  '{"type":"assistant","message":{"content":[{"type":"text","text":"primero"}]}}' \
+  '{"type":"assistant","message":{"content":[{"type":"text","text":"resumen final"}]}}' \
+  '{"type":"user","message":{"content":[{"type":"tool_result","content":"x"}]}}' > "$tf"
+check "last assistant" "resumen final" "$(bridge_last_assistant "$tf")"
+rm -f "$tf"
+
+# bridge_reprompt con transporte simulado.
+bridge_publish_reprompt() { :; }
+REPROMPT_TEXT=""
+bridge_wait_reprompt() { printf '%s' "$REPROMPT_TEXT"; }
+BRIDGE_TOPIC_REPROMPT=rep1
+
+flag_on=$(mktemp)            # existe -> modo ON
+BRIDGE_REPROMPT_FLAG="$flag_on"; REPROMPT_TEXT="ejecuta los tests"
+check "reprompt on+texto→block" block "$(bridge_reprompt <<<'{"transcript_path":""}' | jq -r '.decision // empty')"
+
+BRIDGE_REPROMPT_FLAG="$flag_on"; REPROMPT_TEXT=""   # ON pero sin respuesta
+out_to=$(bridge_reprompt <<<'{"transcript_path":""}')
+[ -z "$out_to" ] && printf 'ok   reprompt on+timeout→para\n' || { printf 'FAIL reprompt timeout emitió [%s]\n' "$out_to"; fails=$((fails+1)); }
+rm -f "$flag_on"
+
+BRIDGE_REPROMPT_FLAG="$(mktemp -u)"; REPROMPT_TEXT="lo que sea"   # flag inexistente -> OFF
+out_off=$(bridge_reprompt <<<'{"transcript_path":""}')
+[ -z "$out_off" ] && printf 'ok   reprompt off→no molesta\n' || { printf 'FAIL reprompt off emitió [%s]\n' "$out_off"; fails=$((fails+1)); }
+
 echo "---"
 if [ "$fails" -eq 0 ]; then echo "todos los tests OK"; else echo "$fails test(s) fallidos"; exit 1; fi

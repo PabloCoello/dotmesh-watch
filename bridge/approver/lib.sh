@@ -10,6 +10,11 @@
 : "${BRIDGE_NTFY_BASE:=https://ntfy.sh}"
 : "${BRIDGE_TIMEOUT:=300}"
 
+# Reprompt al terminar (hook Stop). Opt-in por flag: el hook Stop se dispara en
+# CADA turno, así que sin el flag bloquearía siempre. Actívalo con `reprompt.sh on`.
+: "${BRIDGE_REPROMPT_TIMEOUT:=300}"
+: "${BRIDGE_REPROMPT_FLAG:=${XDG_CACHE_HOME:-$HOME/.cache}/dotmesh-bridge/reprompt-on}"
+
 # Comandos Bash que SÍ escalan a la muñeca (regex extendida). Lo demás pasa de
 # largo sin push: en bypass se ejecuta como siempre. Override/extiende en .env.
 : "${BRIDGE_DANGER_REGEX:=rm +-[a-zA-Z]*[rf]|--force|--hard|git +clean +-[a-zA-Z]*f|git +branch +-D|sudo +|dd +if=|mkfs|chmod +-R|chown +-R|(curl|wget) +[^|]*\| *(sh|bash)|npm +publish|shutdown|reboot|poweroff|kubectl +delete|terraform +(apply|destroy)|docker +(rm|rmi|system +prune)}"
@@ -155,4 +160,76 @@ bridge_decide() {
     deny)  bridge_emit deny  "Denegado desde la muñeca" ;;
     *)     bridge_emit ask   "Sin respuesta del bridge (timeout); decide en el terminal" ;;
   esac
+}
+
+# ---- Reprompt al terminar una tarea (hook Stop) ----
+
+# Último mensaje de texto del asistente en el transcript (el resumen final).
+bridge_last_assistant() {
+  local transcript="$1"
+  [ -f "$transcript" ] || return 0
+  jq -rs '
+    [ .[] | select(.type=="assistant")
+      | (if (.message.content|type)=="array"
+         then ([.message.content[]?|select(.type=="text")|.text]|join("\n"))
+         else (.message.content // "") end) ]
+    | map(select(. != "")) | last // ""
+  ' "$transcript" 2>/dev/null || true
+}
+
+# Botones de reprompt predefinido (publican texto en el topic REPROMPT). Máx. 3.
+bridge_reprompt_actions() {
+  local url="$BRIDGE_NTFY_BASE/$BRIDGE_TOPIC_REPROMPT" auth=""
+  [ -n "${BRIDGE_TOKEN:-}" ] && auth=", headers.Authorization='Bearer $BRIDGE_TOKEN'"
+  printf "http, Continúa, %s, method=POST, body='continúa con lo siguiente', clear=true%s; http, Tests, %s, method=POST, body='ejecuta los tests y arregla lo que falle', clear=true%s; http, Commit, %s, method=POST, body='haz commit de los cambios', clear=true%s" \
+    "$url" "$auth" "$url" "$auth" "$url" "$auth"
+}
+
+# Push de "tarea terminada" con el resumen y los botones de reprompt. $1=resumen
+bridge_publish_reprompt() {
+  curl -fsS \
+    ${BRIDGE_TOKEN:+-H "Authorization: Bearer $BRIDGE_TOKEN"} \
+    -H "Title: Claude terminó — ¿siguiente?" \
+    -H "Tags: white_check_mark" \
+    -H "Actions: $(bridge_reprompt_actions)" \
+    -d "$1" \
+    "$BRIDGE_NTFY_BASE/$BRIDGE_TOPIC_REQ" >/dev/null
+}
+
+# Espera un reprompt (cualquier mensaje no vacío) en el topic REPROMPT. $1=since.
+bridge_wait_reprompt() {
+  local since="${1:-all}" line ev msg
+  curl -fsS --no-buffer --max-time "$BRIDGE_REPROMPT_TIMEOUT" \
+    ${BRIDGE_TOKEN:+-H "Authorization: Bearer $BRIDGE_TOKEN"} \
+    "$BRIDGE_NTFY_BASE/$BRIDGE_TOPIC_REPROMPT/json?since=$since" 2>/dev/null | \
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    ev=$(jq -r '.event // empty' <<<"$line" 2>/dev/null) || continue
+    [ "$ev" = "message" ] || continue
+    msg=$(jq -r '.message // empty' <<<"$line" 2>/dev/null)
+    [ -n "$msg" ] && { printf '%s' "$msg"; break; }
+  done
+}
+
+# Emite el JSON del hook Stop para continuar con un reprompt. $1=texto
+bridge_emit_continue() {
+  jq -nc --arg r "$1" '{decision: "block", reason: $r}'
+}
+
+# Núcleo del hook Stop: si el modo reprompt está activo (flag), avisa con el
+# resumen y espera un reprompt; si llega, hace continuar a Claude. Si no, calla
+# (deja parar). Lee la entrada del hook Stop por stdin.
+bridge_reprompt() {
+  local input transcript summary text start
+  input=$(cat)
+  [ -e "${BRIDGE_REPROMPT_FLAG}" ] || return 0   # opt-in: sin flag, no molesta
+  transcript=$(jq -r '.transcript_path // ""' <<<"$input")
+  summary=$(bridge_last_assistant "$transcript" | tr '\n' ' ' | cut -c1-300)
+  [ -n "$summary" ] || summary="(tarea terminada)"
+  start=$(date +%s)
+  bridge_log "reprompt: aviso enviado; espero ${BRIDGE_REPROMPT_TIMEOUT}s en ${BRIDGE_TOPIC_REPROMPT:-?}"
+  bridge_publish_reprompt "$summary"
+  text=$(bridge_wait_reprompt "$start" || true)
+  [ -n "$text" ] && bridge_emit_continue "$text"
+  return 0   # sin reprompt = deja parar limpio (no debe salir con error)
 }
