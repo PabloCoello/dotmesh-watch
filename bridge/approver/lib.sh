@@ -10,6 +10,10 @@
 : "${BRIDGE_NTFY_BASE:=https://ntfy.sh}"
 : "${BRIDGE_TIMEOUT:=300}"
 
+# Comandos Bash que SÍ escalan a la muñeca (regex extendida). Lo demás pasa de
+# largo sin push: en bypass se ejecuta como siempre. Override/extiende en .env.
+: "${BRIDGE_DANGER_REGEX:=rm +-[a-zA-Z]*[rf]|--force|--hard|git +clean +-[a-zA-Z]*f|git +branch +-D|sudo +|dd +if=|mkfs|chmod +-R|chown +-R|(curl|wget) +[^|]*\| *(sh|bash)|npm +publish|shutdown|reboot|poweroff|kubectl +delete|terraform +(apply|destroy)|docker +(rm|rmi|system +prune)}"
+
 bridge_log() { printf 'bridge: %s\n' "$*" >&2; }
 
 # Id de correlación para una petición.
@@ -31,6 +35,43 @@ bridge_summary() {
     *)
       printf '%s' "$tool"
       ;;
+  esac
+}
+
+# ¿La ruta de un Write/Edit es peligrosa? Seguro si es relativa o cuelga del cwd;
+# peligroso si es absoluta fuera del cwd o toca rutas sensibles. $1=ruta $2=cwd
+bridge_path_dangerous() {
+  local path="$1" cwd="$2"
+  case "$path" in
+    */.ssh/*|*id_rsa*|*/.aws/*|*credential*|/etc/*) return 0 ;;  # sensible
+  esac
+  # Sin cwd confirmado no podemos dar por "dentro del proyecto" una ruta absoluta.
+  if [ -n "$cwd" ]; then
+    case "$path" in
+      "$cwd"/*|"$cwd") return 1 ;;  # dentro del proyecto -> seguro
+    esac
+  fi
+  case "$path" in
+    /*) return 0 ;;   # absoluta fuera del cwd -> escala
+    *)  return 1 ;;   # relativa (cuelga del cwd) -> seguro
+  esac
+}
+
+# ¿Esta llamada a herramienta debe escalar a la muñeca? 0=sí (peligrosa) 1=no.
+# $1=tool_name  $2=json de entrada
+bridge_is_dangerous() {
+  local tool="$1" input="$2" cmd cwd path
+  case "$tool" in
+    Bash)
+      cmd=$(jq -r '.tool_input.command // ""' <<<"$input")
+      [[ $cmd =~ $BRIDGE_DANGER_REGEX ]]
+      ;;
+    Write|Edit|MultiEdit|NotebookEdit)
+      cwd=$(jq -r '.cwd // ""' <<<"$input")
+      path=$(jq -r '.tool_input.file_path // .tool_input.notebook_path // ""' <<<"$input")
+      bridge_path_dangerous "$path" "$cwd"
+      ;;
+    *) return 0 ;;   # herramienta inesperada en el matcher -> por seguridad, escala
   esac
 }
 
@@ -98,6 +139,9 @@ bridge_decide() {
   local input tool summary id start decision
   input=$(cat)
   tool=$(jq -r '.tool_name // "?"' <<<"$input")
+  # Solo lo peligroso va a la muñeca; lo seguro pasa de largo (sin push ni
+  # bloqueo). En bypass, eso significa que se ejecuta como siempre.
+  bridge_is_dangerous "$tool" "$input" || return 0
   summary=$(bridge_summary "$tool" "$input")
   id=$(bridge_id)
   start=$(date +%s)

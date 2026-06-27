@@ -21,17 +21,36 @@ check() { # $1=etiqueta $2=esperado $3=obtenido
   fi
 }
 
-decide_with() { # $1=decisión simulada $2=json de entrada -> imprime permissionDecision
+decide_with() { # $1=decisión simulada $2=json de entrada -> imprime permissionDecision (vacío si pasa de largo)
   FAKE_DECISION="$1"
-  printf '%s' "$2" | bridge_decide | jq -r '.hookSpecificOutput.permissionDecision'
+  printf '%s' "$2" | bridge_decide | jq -r '.hookSpecificOutput.permissionDecision // empty'
 }
 
-check "allow"        allow "$(decide_with allow '{"tool_name":"Bash","tool_input":{"command":"git status"}}')"
-check "deny"         deny  "$(decide_with deny  '{"tool_name":"Bash","tool_input":{"command":"rm -rf /"}}')"
+# Solo entradas PELIGROSAS llegan a la decisión.
+check "allow"        allow "$(decide_with allow '{"tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/x"}}')"
+check "deny"         deny  "$(decide_with deny  '{"tool_name":"Bash","tool_input":{"command":"git push --force"}}')"
 check "timeout→ask"  ask   "$(decide_with ''    '{"tool_name":"Write","tool_input":{"file_path":"/etc/hosts"}}')"
 
+# Lo SEGURO pasa de largo: sin salida, sin push.
+PUBLISHED_BODY="(sin tocar)"
+safe_out=$(decide_with allow '{"tool_name":"Bash","tool_input":{"command":"git status"}}')
+[ -z "$safe_out" ] && [ "$PUBLISHED_BODY" = "(sin tocar)" ] \
+  && printf 'ok   comando seguro pasa de largo\n' \
+  || { printf 'FAIL comando seguro no pasó de largo (out=[%s] body=[%s])\n' "$safe_out" "$PUBLISHED_BODY"; fails=$((fails+1)); }
+
+# El clasificador de peligro.
+is_dangerous() { bridge_is_dangerous "$1" "$2" && echo si || echo no; }
+check "peligro: rm -rf"      si "$(is_dangerous Bash '{"tool_input":{"command":"rm -rf build"}}')"
+check "peligro: --force"     si "$(is_dangerous Bash '{"tool_input":{"command":"git push --force"}}')"
+check "peligro: sudo"        si "$(is_dangerous Bash '{"tool_input":{"command":"sudo apt update"}}')"
+check "seguro: git status"   no "$(is_dangerous Bash '{"tool_input":{"command":"git status"}}')"
+check "seguro: ls"           no "$(is_dangerous Bash '{"tool_input":{"command":"ls -la"}}')"
+check "Write en cwd seguro"  no "$(is_dangerous Write '{"cwd":"/home/p/proj","tool_input":{"file_path":"/home/p/proj/a.txt"}}')"
+check "Write fuera escala"   si "$(is_dangerous Write '{"cwd":"/home/p/proj","tool_input":{"file_path":"/etc/hosts"}}')"
+check "Write .ssh escala"    si "$(is_dangerous Edit  '{"cwd":"/home/p/proj","tool_input":{"file_path":"/home/p/.ssh/config"}}')"
+
 # La razón aparece al denegar y no al permitir.
-reason_deny=$(FAKE_DECISION=deny; printf '%s' '{"tool_name":"Bash","tool_input":{"command":"x"}}' | bridge_decide | jq -r '.hookSpecificOutput.permissionDecisionReason // ""')
+reason_deny=$(FAKE_DECISION=deny; printf '%s' '{"tool_name":"Bash","tool_input":{"command":"rm -rf x"}}' | bridge_decide | jq -r '.hookSpecificOutput.permissionDecisionReason // ""')
 [ -n "$reason_deny" ] && printf 'ok   deny lleva razón\n' || { printf 'FAIL deny sin razón\n'; fails=$((fails+1)); }
 
 # El resumen de Write NO filtra contenido: solo la ruta.
@@ -45,9 +64,9 @@ case "$PUBLISHED_BODY" in
   *)                    printf 'FAIL resumen Write inesperado [%s]\n' "$PUBLISHED_BODY"; fails=$((fails+1)) ;;
 esac
 
-# El resumen de Bash recorta a 200 caracteres.
+# El resumen de Bash recorta a 200 caracteres (comando peligroso para que publique).
 FAKE_DECISION=allow
-long=$(printf 'a%.0s' {1..400})
+long="sudo $(printf 'a%.0s' {1..400})"
 bridge_decide >/dev/null <<<"{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"$long\"}}"
 [ "${#PUBLISHED_BODY}" -le 200 ] && printf 'ok   Bash recorta a ≤200\n' || { printf 'FAIL Bash no recorta (%s)\n' "${#PUBLISHED_BODY}"; fails=$((fails+1)); }
 
