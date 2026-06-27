@@ -52,11 +52,20 @@ sim: build
 
 # Copia a un reloj montado por USB/MTP:
 #   make sideload GARMIN_DIR=/run/user/1000/gvfs/mtp.../GARMIN
+# Detecta APPS/ o Apps/ (varía según firmware) y usa `gio copy` en montajes gvfs:
+# por MTP el `cp` clásico falla ("operation not supported" al sobrescribir).
 sideload: build
 	@[ -n "$(GARMIN_DIR)" ] || { echo "Indica GARMIN_DIR=/ruta/al/GARMIN montado"; exit 1; }
-	@[ -d "$(GARMIN_DIR)/APPS" ] || { echo "No existe $(GARMIN_DIR)/APPS — ¿está montado el reloj?"; exit 1; }
-	cp $(PRG) "$(GARMIN_DIR)/APPS/"
-	@echo "Copiada. Desmonta el reloj y selecciónala en la lista de esferas."
+	@dir=""; for d in "$(GARMIN_DIR)/APPS" "$(GARMIN_DIR)/Apps"; do [ -d "$$d" ] && dir="$$d"; done; \
+	 [ -n "$$dir" ] || { echo "No encuentro APPS/ ni Apps/ en $(GARMIN_DIR) — ¿montado?"; exit 1; }; \
+	 echo "Copiando $(PRG) -> $$dir/"; \
+	 if command -v gio >/dev/null 2>&1 && case "$(GARMIN_DIR)" in */gvfs/*) true;; *) false;; esac; then \
+	   gio remove "$$dir/$(APP).prg" 2>/dev/null || true; \
+	   gio copy "$(PRG)" "$$dir/$(APP).prg"; \
+	 else \
+	   cp "$(PRG)" "$$dir/"; \
+	 fi
+	@echo "Copiada. Desconecta el reloj y selecciónala en la lista de esferas."
 
 clean:
 	rm -rf $(BUILD)
