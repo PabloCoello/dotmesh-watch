@@ -92,4 +92,4 @@ de cada fase por iniciativa propia.
 - No crees `SPEC.md`, `PLAN.md`, `TODO.md`, `NOTES.md`, `CHECKPOINT.md` en la raíz
   salvo petición explícita.
 - Planificación persistente en `.ai/tasks/YYYY-MM-DD-slug/`; scratch en `.ai/tmp/`.
-- Solo `.ai/tmp/` está ignorado; versionar `.ai/tasks/` lo decide el proyecto.
+- El workspace `.ai/` es **local y no se versiona** (ni tareas ni scratch).
