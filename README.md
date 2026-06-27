@@ -88,7 +88,7 @@ empieza allí.
   potencia `onUpdate` corre cada segundo, así que el cursor parpadea sin
   `onPartialUpdate`.
 - **Tipografía.** **JetBrains Mono** bitmap. `scripts/gen-font.py` genera la hora
-  (SemiBold ~72 px) y el texto (Medium ~18 px) desde el TTF; los iconos de la
+  (SemiBold ~72 px) y el texto (Medium ~22 px) desde el TTF; los iconos de la
   powerline (batería por niveles, figura andando, campana) los empaqueta
   `scripts/gen-iconfont.py` desde la Nerd Font, remapeados a la PUA del BMP para
   que Connect IQ los resuelva. No se editan los `.fnt`/`.png` a mano.
