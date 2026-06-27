@@ -12,3 +12,6 @@ developer_key*
 # Editor / SO
 .DS_Store
 *.swp
+
+# Workspace de IA (scratch efímero; .ai/tasks/ lo decide el proyecto)
+.ai/tmp/
