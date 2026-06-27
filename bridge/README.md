@@ -42,9 +42,12 @@ bridge/
 ├── approver/                  # lado host (este repo)
 │   ├── lib.sh                 # transporte ntfy + emisión del JSON del hook
 │   ├── pretooluse-approve.sh  # hook PreToolUse (aprobar/denegar)
+│   ├── stop-reprompt.sh       # hook Stop (aviso + reprompt al terminar)
+│   ├── reprompt.sh            # toggle del modo reprompt (on/off/status)
 │   ├── test.sh                # test local sin red
 │   └── .env.example           # config (copia a .env, fuera de git)
-└── tasker/                    # lado Android (pendiente): perfil Tasker exportado
+├── watchapp/                  # approver nativo Connect IQ (camino principal del reloj)
+└── tasker/                    # alternativa legada vía Tasker (si ya lo usas)
 ```
 
 ## Puesta en marcha (host)
@@ -79,9 +82,11 @@ Guía paso a paso completa en [`SETUP.md`](SETUP.md). En corto:
 
 - App **ntfy** en el móvil suscrita a los dos topics; el push lleva botones
   **Aprobar/Denegar** que publican `"<id> allow|deny"` en el topic DEC de un toque.
-- **Tasker** + Connect IQ **Tasker Trigger**: una entrada del Garmin dispara una
-  tarea que publica un `allow`/`deny` "pelado" en el topic DEC (el hook lo acepta
-  igual; vale con una petición pendiente por par de topics).
+- **Approver nativo** (recomendado, sin apps de pago): la app Connect IQ de
+  [`watchapp/`](watchapp/) publica `allow`/`deny` y los reprompts en ntfy
+  directamente desde la muñeca con `makeWebRequest`. Sustituye a Tasker.
+- **Tasker** (alternativa legada): Connect IQ *Tasker Trigger* + una tarea que
+  publica un `allow`/`deny` "pelado" en el topic DEC. Solo si ya usas Tasker.
 
 ## Seguridad
 
