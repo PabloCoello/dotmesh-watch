@@ -21,7 +21,7 @@ que el tema de VS Code, Warp, Starship y delta.
 - **Lenguaje**: Monkey C (Connect IQ SDK).
 - **Build**: `make` sobre `monkeyc` / `monkeydo` / `connectiq` (simulador).
 - **Activos**: fuentes bitmap e icono generados con **Python (Pillow)** desde los
-  TTF de JetBrains Mono (incluida la Nerd Font para la campana).
+  TTF de JetBrains Mono (incluida la Nerd Font para los iconos de la powerline).
 - **Sin tests ni lint.** La verificación es **compilar y mirar en el simulador**
   (o sideload al reloj).
 
@@ -34,7 +34,8 @@ make sim        # abre el simulador y carga la esfera (monkeydo)
 make sideload GARMIN_DIR=/ruta/al/GARMIN   # copia el .prg a un reloj montado
 make clean
 
-python3 scripts/gen-font.py <ttf> <px> <charset> <nombre>   # regenerar fuente bitmap
+python3 scripts/gen-font.py <ttf> <px> <charset> <nombre>   # fuente bitmap (hora/texto)
+python3 scripts/gen-iconfont.py [px]                        # iconos powerline (Nerd Font → PUA)
 python3 scripts/gen-icon.py                                 # regenerar el launcher icon
 sudo bash scripts/ubuntu2404-webkit40.sh                    # SDK Manager en Ubuntu 24.04
 ```
@@ -48,8 +49,8 @@ equipo el PATH del SDK aún no es permanente; se exporta leyendo
 - `manifest.xml` — app `watchface`, único device `epix2pro47mm`, GUID, icono.
 - `source/` — `DotmeshWatchApp` (entry), `DotmeshWatchView` (la esfera) y
   `Palette.mc` (espejo de la paleta de `DESIGN.md`).
-- `resources/fonts/` — fuentes bitmap (`TimeFont`, `SmallFont`, `IconFont`) y sus
-  `.fnt`/`.png` **generados**; no se editan a mano.
+- `resources/fonts/` — fuentes bitmap (`TimeFont`, `SmallFont` por `gen-font.py`;
+  `IconFont` por `gen-iconfont.py`) y sus `.fnt`/`.png` **generados**; no a mano.
 - `resources/drawables/` — `launcher_icon.png` (generado).
 - `bridge/` — plan para aprobar Claude y reflejar avisos desde la muñeca (Tasker +
   approver). Independiente de la esfera. Pendiente.
@@ -58,8 +59,15 @@ equipo el PATH del SDK aún no es permanente; se exporta leyendo
 
 El lenguaje visual empieza en `dotmesh/docs/DESIGN.md`. **Si cambias un color, se
 cambia allí primero y se propaga aquí.** Principio: monocromo primero, **color solo
-como señal** — peach = la hora (identidad), sage = notificaciones, rose = batería
-baja.
+como señal**. La esfera es una **columna de terminal** alineada a la izquierda, en
+tres filas: `# sáb 27` como **comentario** de código (gris); el **prompt** = powerline
+starship con **borde izquierdo recto y pico a la derecha** (rampa **chrome** de
+grafito) con 3 segmentos — **batería** (peach) · **pasos** (azul) · **notificaciones**
+(gris, **violeta** si las hay); y debajo, pegada, la hora como **input**: chevron `❯`
+**sage**, `HH:MM` **blanco** y cursor `▏` **teal** (lo vivo) que parpadea. Señales:
+peach = batería, azul = pasos, violeta = notificaciones, rose = batería baja. En AOD:
+negro, comentario + `❯ HH:MM` + cursor fijo, sin powerline. Las constantes de layout
+viven juntas arriba de `DotmeshWatchView.mc`.
 
 ## Límites
 

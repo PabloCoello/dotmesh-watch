@@ -29,12 +29,15 @@ dotmesh-watch/
 ├── monkey.jungle          # config de build
 ├── source/
 │   ├── DotmeshWatchApp.mc  # entry point (AppBase)
-│   ├── DotmeshWatchView.mc # la esfera (WatchFace): hora, fecha, segundos, estado
+│   ├── DotmeshWatchView.mc # la esfera (WatchFace): columna terminal (comentario·prompt·input)
 │   └── Palette.mc          # paleta dotmesh (espejo de DESIGN.md)
 ├── resources/
+│   ├── fonts/              # fuentes bitmap generadas (hora, texto, iconos)
 │   ├── strings/strings.xml
 │   └── drawables/{drawables.xml, launcher_icon.png}
-├── scripts/gen-icon.py    # regenera el icono (mesh de acentos sobre Ink)
+├── scripts/gen-font.py     # regenera una fuente bitmap monoespaciada desde un TTF
+├── scripts/gen-iconfont.py # regenera los iconos de la powerline (Nerd Font → PUA)
+├── scripts/gen-icon.py     # regenera el launcher icon (mesh de acentos sobre Ink)
 ├── bridge/                # aprobar desde la muñeca (pendiente)
 └── Makefile
 ```
@@ -66,17 +69,35 @@ conéctalo por USB, monta el almacenamiento y apunta `GARMIN_DIR` a la carpeta
 
 ## Diseño
 
-- **Monocromo primero**: fondo Ink-0 (`#16171B`), hora en Paper (`#E9EAEC`). El
-  color solo como señal — el segundero va en teal (cursor = lo vivo) y el punto
-  de estado del agente usará sage/gold/rose.
-- **AMOLED / Always-On**: en bajo consumo el fondo pasa a negro puro y los
-  segundos se repintan con `onPartialUpdate` recortando una banda mínima, para
-  ahorrar batería y no forzar burn-in.
-- **Tipografía**: de momento fuentes del sistema. Incrustar **JetBrains Mono**
-  (la voz mono de dotmesh) es un follow-up.
+Dirección **«prompt/terminal»**: la esfera es tu shell. La paleta es la de
+[`dotmesh/docs/DESIGN.md`](../dotmesh/docs/DESIGN.md); cualquier cambio de color
+empieza allí.
+
+- **Monocromo primero, color = señal.** Fondo negro (AMOLED). Una **columna de
+  terminal** alineada a la izquierda, en tres filas: `# sáb 27` como **comentario**
+  de código (gris); el **prompt** (*powerline* estilo starship con **borde izquierdo
+  recto y pico a la derecha**): **batería** en *peach* · **pasos** en *azul* ·
+  **notificaciones** en gris, **violeta** cuando las hay; y debajo, pegada, la hora
+  como **input** del terminal: `❯ HH:MM` con chevron *sage*, hora **blanca** y cursor
+  `▏` *teal* que parpadea. Los segmentos usan la rampa **chrome** de grafito.
+- **Datos reales, sin placeholders.** La powerline muestra lo que el reloj expone:
+  batería (con su nivel real, *rose* por debajo del 15 %), pasos y notificaciones.
+  Nada se finge.
+- **AMOLED / Always-On.** En bajo consumo el fondo es negro puro y todo se
+  atenúa: el comentario + `❯ HH:MM` con el cursor fijo, sin powerline. En alta
+  potencia `onUpdate` corre cada segundo, así que el cursor parpadea sin
+  `onPartialUpdate`.
+- **Tipografía.** **JetBrains Mono** bitmap. `scripts/gen-font.py` genera la hora
+  (SemiBold ~72 px) y el texto (Medium ~18 px) desde el TTF; los iconos de la
+  powerline (batería por niveles, figura andando, campana) los empaqueta
+  `scripts/gen-iconfont.py` desde la Nerd Font, remapeados a la PUA del BMP para
+  que Connect IQ los resuelva. No se editan los `.fnt`/`.png` a mano.
 
 ## Estado
 
-Andamiaje funcional: una esfera con hora, fecha, segundos y un punto de estado
-*placeholder*. Pendiente — cablear ese punto al estado real del agente (ver
-`bridge/`), fuentes propias y, si se quiere, complicaciones.
+Esfera completa en la dirección «prompt/terminal» v3: columna de terminal a la
+izquierda — comentario de fecha, powerline (batería · pasos · notificaciones) y la
+hora como input con cursor
+vivo. Compila limpio para `epix2pro47mm` y verificada en el simulador CIQ.
+Pendiente — verla en el reloj real, cablear las notificaciones al estado del
+agente de Claude (ver `bridge/`) y, si se quiere, ajustes o complicaciones.
