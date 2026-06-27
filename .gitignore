@@ -13,5 +13,5 @@ developer_key*
 .DS_Store
 *.swp
 
-# Workspace de IA (scratch efímero; .ai/tasks/ lo decide el proyecto)
-.ai/tmp/
+# Workspace de IA — local, no se versiona (ni tareas ni scratch)
+.ai/
