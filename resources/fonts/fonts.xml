@@ -1,0 +1,7 @@
+<fonts>
+    <!-- JetBrains Mono, bitmap generadas con scripts/gen-font.py -->
+    <font id="TimeFont" filename="jbmono_time.fnt" />
+    <font id="SmallFont" filename="jbmono_small.fnt" />
+    <!-- Iconos desde JetBrains Mono Nerd Font (campana de notificaciones) -->
+    <font id="IconFont" filename="jbmono_icons.fnt" />
+</fonts>

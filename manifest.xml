@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<!-- dotmesh — esfera Connect IQ. Objetivo: Garmin Epix Pro (Gen 2) 47 mm. -->
+<iq:manifest version="3" xmlns:iq="http://www.garmin.com/xml/connectiq">
+    <iq:application
+        id="330ba8de7747409ba99f095931067709"
+        type="watchface"
+        name="@Strings.AppName"
+        entry="DotmeshWatchApp"
+        minApiLevel="3.4.0"
+        launcherIcon="@Drawables.LauncherIcon">
+        <iq:products>
+            <iq:product id="epix2pro47mm"/>
+        </iq:products>
+        <iq:permissions/>
+        <iq:languages>
+            <iq:language>eng</iq:language>
+        </iq:languages>
+    </iq:application>
+</iq:manifest>

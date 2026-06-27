@@ -1,0 +1,5 @@
+
+# dotmesh watch face — configuración de build.
+# Un solo dispositivo objetivo; el resto se hereda por defecto
+# (source/ y resources/ se incluyen automáticamente).
+project.manifest = manifest.xml

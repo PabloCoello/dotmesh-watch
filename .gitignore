@@ -1,0 +1,14 @@
+# Build de Connect IQ
+bin/
+*.prg
+*.iq
+*.iqdbg
+
+# Claves de firma del desarrollador — NUNCA al repo
+developer_key*
+*.pem
+*.der
+
+# Editor / SO
+.DS_Store
+*.swp
