@@ -12,7 +12,16 @@ SRC        := $(wildcard source/*.mc)
 RES        := $(shell find resources -type f 2>/dev/null)
 GARMIN_DIR ?=
 
-.PHONY: help build sim sideload key clean
+# Segunda app: approver (bridge/watchapp/). Comparte device y developer key.
+APPR_APP      := dotmesh-approver
+APPR_DIR      := bridge/watchapp
+APPR_JUNGLE   := $(APPR_DIR)/monkey.jungle
+APPR_MANIFEST := $(APPR_DIR)/manifest.xml
+APPR_PRG      := $(BUILD)/$(APPR_APP).prg
+APPR_SRC      := $(wildcard $(APPR_DIR)/source/*.mc)
+APPR_RES      := $(shell find $(APPR_DIR)/resources -type f 2>/dev/null)
+
+.PHONY: help build sim sideload key clean build-approver sim-approver sideload-approver
 
 help:
 	@echo "Targets:"
@@ -21,6 +30,10 @@ help:
 	@echo "  make sim       lanza el simulador y carga la esfera"
 	@echo "  make sideload  copia el .prg a un Garmin montado (GARMIN_DIR=/ruta/GARMIN)"
 	@echo "  make clean     borra $(BUILD)/"
+	@echo "  --- approver (bridge/watchapp) ---"
+	@echo "  make build-approver     compila $(APPR_PRG)"
+	@echo "  make sim-approver       lanza el simulador con el approver"
+	@echo "  make sideload-approver  copia el approver a un Garmin montado"
 
 # Clave de firma: idempotente, no se regenera si ya existe.
 $(KEY):
@@ -66,6 +79,38 @@ sideload: build
 	   cp "$(PRG)" "$$dir/"; \
 	 fi
 	@echo "Copiada. Desconecta el reloj y selecciónala en la lista de esferas."
+
+# --- approver (segunda app) ---
+build-approver: $(APPR_PRG)
+
+$(APPR_PRG): $(KEY) $(APPR_MANIFEST) $(APPR_JUNGLE) $(APPR_SRC) $(APPR_RES)
+	@command -v monkeyc >/dev/null 2>&1 || { echo "monkeyc no está en el PATH (instala el Connect IQ SDK)"; exit 1; }
+	@mkdir -p $(BUILD)
+	monkeyc -f $(APPR_JUNGLE) -o $(APPR_PRG) -y $(KEY) -d $(DEVICE) -w
+
+sim-approver: build-approver
+	@command -v connectiq >/dev/null 2>&1 || { echo "connectiq no está en el PATH (¿añadiste el SDK?)"; exit 1; }
+	@if ! pgrep -x simulator >/dev/null 2>&1; then \
+		echo "Abriendo el simulador..."; \
+		( connectiq >/dev/null 2>&1 & ); \
+		printf "Esperando al simulador"; \
+		for i in 1 2 3 4 5 6 7 8; do pgrep -x simulator >/dev/null 2>&1 && break; printf "."; sleep 1; done; \
+		echo; sleep 2; \
+	fi
+	monkeydo $(APPR_PRG) $(DEVICE)
+
+sideload-approver: build-approver
+	@[ -n "$(GARMIN_DIR)" ] || { echo "Indica GARMIN_DIR=/ruta/al/GARMIN montado"; exit 1; }
+	@dir=""; for d in "$(GARMIN_DIR)/APPS" "$(GARMIN_DIR)/Apps"; do [ -d "$$d" ] && dir="$$d"; done; \
+	 [ -n "$$dir" ] || { echo "No encuentro APPS/ ni Apps/ en $(GARMIN_DIR) — ¿montado?"; exit 1; }; \
+	 echo "Copiando $(APPR_PRG) -> $$dir/"; \
+	 if command -v gio >/dev/null 2>&1 && case "$(GARMIN_DIR)" in */gvfs/*) true;; *) false;; esac; then \
+	   gio remove "$$dir/$(APPR_APP).prg" 2>/dev/null || true; \
+	   gio copy "$(APPR_PRG)" "$$dir/$(APPR_APP).prg"; \
+	 else \
+	   cp "$(APPR_PRG)" "$$dir/"; \
+	 fi
+	@echo "Copiada. Desconecta el reloj; el approver sale en la lista de apps."
 
 clean:
 	rm -rf $(BUILD)

@@ -18,3 +18,6 @@ developer_key*
 
 # Secretos del bridge (token ntfy, topics) — fuera del repo
 bridge/approver/.env
+
+# Config local del approver (topics reales) — fuera del repo; copia del .example
+bridge/watchapp/resources/settings/properties.xml

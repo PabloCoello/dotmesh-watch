@@ -1,0 +1,6 @@
+<properties>
+    <property id="baseUrl" type="string">https://ntfy.sh/</property>
+    <property id="decTopic" type="string"></property>
+    <property id="repTopic" type="string"></property>
+    <property id="token" type="string"></property>
+</properties>

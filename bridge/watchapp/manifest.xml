@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<!-- dotmesh approver — app Connect IQ para decidir permisos de Claude desde la
+     muñeca. Independiente de la esfera (otro GUID, otra app). Objetivo: Epix Pro
+     (Gen 2) 47 mm. Hace POST a ntfy (publish-as-JSON) con makeWebRequest. -->
+<iq:manifest version="3" xmlns:iq="http://www.garmin.com/xml/connectiq">
+    <iq:application
+        id="cedd2519a1334d47b78c84b540109dcd"
+        type="watch-app"
+        name="@Strings.AppName"
+        entry="ApproverApp"
+        minApiLevel="3.4.0"
+        launcherIcon="@Drawables.LauncherIcon">
+        <iq:products>
+            <iq:product id="epix2pro47mm"/>
+        </iq:products>
+        <iq:permissions>
+            <iq:uses-permission id="Communications"/>
+        </iq:permissions>
+        <iq:languages>
+            <iq:language>eng</iq:language>
+        </iq:languages>
+    </iq:application>
+</iq:manifest>

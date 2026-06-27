@@ -1,0 +1,4 @@
+
+# dotmesh approver — configuración de build (segunda app del repo).
+# source/ y resources/ se incluyen por defecto, relativos a esta carpeta.
+project.manifest = manifest.xml
