@@ -75,8 +75,11 @@ Requisitos: `curl` y `jq`.
 ## Paso 3 — Móvil (Android, app ntfy)
 
 1. Instala **ntfy** (Play Store / F-Droid).
-2. **Suscríbete** a los dos topics (REQ y DEC). Si te autoalojas o reservas,
-   configura el servidor y el token en la app.
+2. **Suscríbete al topic REQ**: botón **+** → escribe solo el **nombre** del topic
+   (el valor de `BRIDGE_TOPIC_REQ`, sin `https://ntfy.sh/`); deja el servidor por
+   defecto. **DEC no hace falta suscribirlo** — ahí *se envían* las decisiones (los
+   botones hacen POST y el host escucha); suscríbelo solo para depurar.
+   Si te autoalojas o reservas, configura el servidor y el token en la app.
 3. Cuando Claude pida permiso, llega una notificación con dos botones, **Aprobar**
    y **Denegar**: un toque y listo. Eso publica la decisión en el topic DEC y el
    hook se libera. (Esto ya te sirve sin reloj.)
