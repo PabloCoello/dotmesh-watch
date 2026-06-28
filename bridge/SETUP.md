@@ -213,6 +213,24 @@ veces**, una por matcher, pasando el tipo como argumento:
 `Stop` ya avisa de que Claude espera; así no llega por duplicado). `permission_prompt`
 avisa siempre, aunque en `bypassPermissions` casi nunca se dispara.
 
+**Fallo por error de API (`StopFailure`).** El hook `stopfailure-notify.sh` avisa
+cuando un turno muere por un error de API (rate limit, sobrecarga, error de
+servidor...). El hook `Stop` **no** dispara en ese caso, ni tampoco en la
+interrupción manual (Esc). Es solo aviso: un único push, sin botones ni espera.
+Regístralo **sin matcher** (captura cualquier tipo de error):
+
+```json
+{ "hooks": { "StopFailure": [
+  { "hooks": [ { "type": "command",
+    "command": "/home/problemas/Documentos/GitHub/dotmesh-watch/bridge/approver/stopfailure-notify.sh" } ] }
+] } }
+```
+
+Avisa **siempre** que haya transporte, esté o no vigilada la sesión (un fallo
+conviene saberlo). Eso sí, el **nombre del proyecto** solo viaja en sesiones
+vigiladas; las demás reciben un aviso genérico, para no filtrar metadatos de las que
+optaste por no espejar.
+
 ## Qué escala a la muñeca (y qué no)
 
 El hook **no** manda push por cada Bash/Write/Edit — eso sería insoportable en
