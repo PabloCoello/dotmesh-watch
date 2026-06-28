@@ -88,8 +88,17 @@ Requisitos: `curl` y `jq`.
 
 ## Paso 4 — Garmin (decidir desde la muñeca)
 
-El Garmin no dispara de forma fiable los botones de una notificación, así que la
-acción desde el reloj va por **Tasker** (en el móvil) + un disparador en el reloj.
+La vía recomendada es el **approver nativo** ([`watchapp/`](watchapp/)): una app Connect
+IQ que lee el topic REQ y publica la decisión sin Tasker ni apps de pago. En sus
+*Properties*, **`reqTopic` es tu `BRIDGE_TOPIC_REQ`** (de donde lee lo pendiente) y
+**`decTopic` tu `BRIDGE_TOPIC_DEC`** (donde manda el `"<id> allow|deny"`). Cuidado con no
+confundir `reqTopic` (peticiones) con `repTopic` (reprompt del hook `Stop`, otro topic
+distinto). Su instalación y configuración están en
+[`watchapp/README.md`](watchapp/README.md).
+
+La alternativa **legada** por **Tasker** (móvil) + un disparador en el reloj sigue aquí
+para quien ya la use; el Garmin no dispara de forma fiable los botones de una
+notificación.
 
 1. **Tasker** (Android): crea dos tareas con una sola acción **HTTP Request** cada una:
    - *Aprobar* → `POST` a `https://ntfy.sh/<TOPIC_DEC>` con cuerpo `allow`.
@@ -100,9 +109,22 @@ acción desde el reloj va por **Tasker** (en el móvil) + un disparador en el re
    Tasker. Mapea, p. ej., dos entradas del menú/atajo del reloj a *Aprobar* y
    *Denegar*. (Los menús exactos varían por versión de la app; la idea: entrada del
    reloj → tarea de Tasker → POST al topic DEC.)
-3. **Aviso en la muñeca**: la propia notificación de ntfy ya se refleja en el reloj
-   (vibración + texto). Opcional: una tarea de Tasker que reaccione al broadcast de
-   ntfy (`io.heckel.ntfy.MESSAGE_RECEIVED`) para vibrar de forma distinta.
+
+### Aviso en la muñeca
+
+Para enterarte de que hay algo que decidir hay tres opciones, de menos a más esfuerzo:
+
+1. **Notificación de ntfy reflejada** (recomendado en v2): si el móvil tiene la app ntfy
+   suscrita al topic REQ, su notificación se refleja en el reloj con vibración y texto.
+   No requiere nada en el reloj y funciona con el approver nativo.
+2. **`Attention.vibrate` en primer plano**: el approver puede vibrar al detectar una
+   petición, pero solo mientras la app está abierta (Connect IQ no deja vibrar en
+   segundo plano a una watch-app). Útil si dejas el approver en pantalla; no sirve como
+   aviso pasivo. Pendiente de implementar.
+3. **App compañera Android** (no recomendado en v2): una app/servicio propio que
+   reaccione al broadcast de ntfy (`io.heckel.ntfy.MESSAGE_RECEIVED`) y empuje un aviso
+   propio. Es lo que hacía la tarea de Tasker; aporta poco frente a la opción 1 y añade
+   una pieza más que mantener.
 
 ---
 

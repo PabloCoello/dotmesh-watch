@@ -21,6 +21,18 @@ publica en el topic. Los mensajes son los mismos que manda el host (`../approver
 `allow` / `deny` al topic DEC, y `continúa con lo siguiente` / `ejecuta los tests y
 arregla lo que falle` / `haz commit de los cambios` al topic REP.
 
+## Cómo lee lo pendiente
+
+El host publica cada petición en el **topic REQ** con un cuerpo que el reloj puede
+partir: `id␟label␟tool␟summary`, con los campos separados por **US (`0x1f`)**. La app lo
+lee con `GET <base><reqTopic>/raw?poll=1&since=15m` en texto plano; ntfy devuelve una
+línea por mensaje de los últimos 15 minutos. El módulo `Bridge` parte la última línea por
+el US y la vuelca en la primera fila del menú: la etiqueta de la sesión como título, la
+herramienta y el resumen debajo. Las líneas **sin US** (reprompts, avisos, preguntas) se
+ignoran, porque no son peticiones de permiso. Si la respuesta llega vacía, la fila queda
+en «(sin petición)»; si es muy grande o hay error de red, la app muestra «Error» con el
+código.
+
 ## Build
 
 Comparte device (`epix2pro47mm`) y `developer_key.der` con la esfera:
@@ -33,7 +45,7 @@ make sideload-approver GARMIN_DIR=/ruta/GARMIN   # al reloj
 
 ## Configurar (sin secretos en el repo)
 
-La app lee la config de **Properties** (`baseUrl`, `decTopic`, `repTopic`, `token`).
+La app lee la config de **Properties** (`baseUrl`, `reqTopic`, `decTopic`, `repTopic`, `token`).
 El fichero `resources/settings/properties.xml` está **gitignorado**; se versiona solo
 `properties.xml.example`. Tu topic real vive en tu copia local, nunca en el repo
 (igual que `approver/.env`).
@@ -49,12 +61,14 @@ El fichero `resources/settings/properties.xml` está **gitignorado**; se version
 ```bash
 cp bridge/watchapp/resources/settings/properties.xml.example \
    bridge/watchapp/resources/settings/properties.xml
-$EDITOR bridge/watchapp/resources/settings/properties.xml   # pega decTopic/repTopic
+$EDITOR bridge/watchapp/resources/settings/properties.xml   # pega reqTopic/decTopic/repTopic
 make build-approver
 make sideload-approver GARMIN_DIR=/ruta/GARMIN
 ```
 
 - **baseUrl** — raíz con barra final. Por defecto `https://ntfy.sh/`.
+- **reqTopic** — tu `BRIDGE_TOPIC_REQ`; de aquí **lee** la app lo que está pendiente.
+  Ojo: no es el mismo que `repTopic` (reprompt), aunque se parezcan.
 - **decTopic** — tu `BRIDGE_TOPIC_DEC` (el del `.env` del host).
 - **repTopic** — tu `BRIDGE_TOPIC_REPROMPT`.
 - **token** — vacío en ntfy.sh; solo para self-host con auth.
@@ -68,14 +82,24 @@ funcionan y configuras desde el móvil sin tocar el build.
 
 ## Uso
 
-Abre **approver** en el reloj → elige *Aprobar/Denegar* (permiso) o *Continúa/Tests/
-Commit* (reprompt) → publica y muestra «Enviado». El aviso de que hay algo que
-decidir llega por la notificación de ntfy reflejada en la muñeca.
+Abre **approver** en el reloj y pulsa *Actualizar*: lee el topic REQ y muestra arriba lo
+que está pendiente (sesión, herramienta y resumen). *Aprobar/Denegar* publican
+`"<id> allow|deny"` correlacionado con esa petición, así que no se confunden varias
+sesiones a la vez. *Continúa/Tests/Commit* mandan el reprompt al topic REP. El aviso de
+que hay algo que decidir llega por la notificación de ntfy reflejada en la muñeca.
 
-## Pendiente (v2)
+## Hecho en v2
 
-- Mostrar en la app el texto de lo que está pendiente (leer el NDJSON de `/json` de
-  ntfy, que el parser JSON de CIQ no traga directo).
+- **Leer lo pendiente en la app**: *Actualizar* consulta `/raw` del topic REQ (texto
+  plano) y pinta la última petición; no hace falta el NDJSON de `/json`, que el parser
+  JSON de CIQ no traga directo.
+- **Respuesta correlacionada por id**: *Aprobar/Denegar* publican `"<id> allow|deny"` en
+  vez de un `allow` pelado, para no mezclar sesiones.
+
+## Pendiente
+
 - Icono propio (ahora reusa el de la esfera).
 - Acceso más rápido (glance/atajo) en vez de abrir la app.
-- Vibración propia al llegar una petición.
+- Vibración propia al llegar una petición; las opciones reales están en
+  [`../SETUP.md`](../SETUP.md), en «Aviso en la muñeca».
+- Picker cuando hay varias sesiones pendientes a la vez (hoy se resuelve la última).
