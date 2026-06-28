@@ -10,10 +10,19 @@
 : "${BRIDGE_NTFY_BASE:=https://ntfy.sh}"
 : "${BRIDGE_TIMEOUT:=300}"
 
-# Reprompt al terminar (hook Stop). Opt-in por flag: el hook Stop se dispara en
-# CADA turno, así que sin el flag bloquearía siempre. Actívalo con `reprompt.sh on`.
+# Reprompt al terminar (hook Stop): cuántos segundos espera tu reprompt. El opt-in
+# del Stop es por sesión (vigilada), igual que el reenvío de permisos (ver abajo).
 : "${BRIDGE_REPROMPT_TIMEOUT:=300}"
-: "${BRIDGE_REPROMPT_FLAG:=${XDG_CACHE_HOME:-$HOME/.cache}/dotmesh-bridge/reprompt-on}"
+
+# Reenvío por sesión (opt-in). Solo las sesiones marcadas (su flag existe) escalan
+# permisos y disparan el reprompt; las demás pasan de largo. Lo gestionan watch.sh
+# y el hook UserPromptSubmit.
+: "${BRIDGE_FORWARD_DIR:=${XDG_CACHE_HOME:-$HOME/.cache}/dotmesh-bridge}"
+
+# Contexto inyectado en sesiones vigiladas (hook UserPromptSubmit): pide cerrar el
+# turno final con la centinela del skill watch-summary, para que el resumen quepa
+# en el reloj. Override en .env si quieres afinar el texto.
+: "${BRIDGE_WATCH_CONTEXT:=Esta sesión se refleja en el reloj (bridge dotmesh-watch). Termina SIEMPRE el turno final con una única línea, la última del mensaje, con el formato exacto: WATCH: <ESTADO> <asunto> · <siguiente-acción>. ESTADO es uno de OK/FALLO/BLOQUEADO/ESPERA, en castellano, sin markdown, <=160 caracteres; mapea la siguiente-acción a Continúa/Tests/Commit cuando encaje. Detalle en la skill watch-summary.}"
 
 # Comandos Bash que SÍ escalan a la muñeca (regex extendida). Lo demás pasa de
 # largo sin push: en bypass se ejecuta como siempre. Override/extiende en .env.
@@ -80,6 +89,75 @@ bridge_is_dangerous() {
   esac
 }
 
+# ¿Está esta sesión vigilada desde la muñeca? El session_id viene del stdin (no
+# confiable) -> se sanea para el nombre del flag (evita path traversal).
+bridge_sid_safe()     { printf '%s' "$1" | tr -cd 'A-Za-z0-9._-'; }
+bridge_forward_flag() { printf '%s/forward-%s' "$BRIDGE_FORWARD_DIR" "$(bridge_sid_safe "$1")"; }
+bridge_is_watched() {
+  local sid="$1"
+  [ -n "$sid" ] || return 1
+  [ -e "$(bridge_forward_flag "$sid")" ]
+}
+
+# ¿El prompt es el comando de toggle? Imprime on|off|status y devuelve 0 si casa
+# ("/watch [on|off|status]" o sin barra; sin argumento = status); si no, return 1.
+bridge_watch_parse() {
+  local p="$1" arg
+  if [[ "$p" =~ ^[[:space:]]*/?watch([[:space:]]+(on|off|status))?[[:space:]]*$ ]]; then
+    arg="${BASH_REMATCH[2]}"
+    printf '%s' "${arg:-status}"
+    return 0
+  fi
+  return 1
+}
+
+# Activa/desactiva/consulta la vigilancia de una sesión. $1=on|off|status $2=sid.
+# Imprime el estado resultante (on|off); devuelve 2 si falta el sid.
+bridge_watch_set() {
+  local action="$1" sid="$2" flag
+  [ -n "$sid" ] || return 2
+  flag=$(bridge_forward_flag "$sid")
+  case "$action" in
+    on)  mkdir -p "$BRIDGE_FORWARD_DIR"; : > "$flag"; printf 'on' ;;
+    off) rm -f "$flag"; printf 'off' ;;
+    *)   bridge_is_watched "$sid" && printf 'on' || printf 'off' ;;
+  esac
+}
+
+# Registra el session_id activo (global y por cwd) para que watch.sh pueda
+# togglear desde el terminal sin conocerlo. $1=sid $2=cwd
+bridge_record_session() {
+  local sid="$1" cwd="$2" h
+  [ -n "$sid" ] || return 0
+  mkdir -p "$BRIDGE_FORWARD_DIR"
+  printf '%s' "$sid" > "$BRIDGE_FORWARD_DIR/last-session"
+  [ -n "$cwd" ] || return 0
+  h=$(printf '%s' "$cwd" | cksum | cut -d' ' -f1)
+  printf '%s' "$sid" > "$BRIDGE_FORWARD_DIR/last-session-$h"
+}
+
+# session_id más reciente registrado: por cwd si se pasa, si no el global. $1=cwd
+bridge_last_session() {
+  local cwd="$1" h f="$BRIDGE_FORWARD_DIR/last-session"
+  if [ -n "$cwd" ]; then
+    h=$(printf '%s' "$cwd" | cksum | cut -d' ' -f1)
+    [ -f "$BRIDGE_FORWARD_DIR/last-session-$h" ] && f="$BRIDGE_FORWARD_DIR/last-session-$h"
+  fi
+  [ -f "$f" ] && cat "$f" || true
+}
+
+# Emite el JSON de UserPromptSubmit que descarta el prompt y muestra un motivo,
+# para que "/watch ..." no consuma un turno. $1=motivo
+bridge_emit_block() {
+  jq -nc --arg r "$1" '{decision: "block", reason: $r}'
+}
+
+# Inyecta additionalContext en UserPromptSubmit (texto extra para el modelo, sin
+# bloquear el prompt). $1=texto
+bridge_emit_context() {
+  jq -nc --arg c "$1" '{hookSpecificOutput: {hookEventName: "UserPromptSubmit", additionalContext: $c}}'
+}
+
 # Cabecera Actions de ntfy: dos botones que publican la decisión correlacionada
 # en el topic DEC (aprobar/denegar de un toque desde la notificación). $1=id
 bridge_actions() {
@@ -89,16 +167,36 @@ bridge_actions() {
     "$url" "$id" "$auth" "$url" "$id" "$auth"
 }
 
-# Publica el push de petición. $1=id $2=título $3=cuerpo
+# Etiqueta legible de la sesión, para X-Title del push y para el cuerpo. Sin 0x1f
+# ni saltos. $1=cwd $2=session_id
+bridge_session_label() {
+  local cwd="$1" sid="$2" base short label
+  if [ -n "$cwd" ]; then base=$(basename -- "$cwd"); else base="claude"; fi
+  [ -n "$base" ] || base="claude"
+  short=$(printf '%s' "$sid" | cut -c1-8)
+  if [ -n "$short" ]; then label="$base ($short)"; else label="$base"; fi
+  printf '%s' "$label" | tr -d '\037\n'
+}
+
+# Cuerpo machine-splittable del push: id␟label␟tool␟summary separados por US
+# (0x1f). El reloj lo parte; el summary ya viene sin saltos (bridge_summary).
+# $1=id $2=label $3=tool $4=summary
+bridge_request_body() {
+  local us; us=$(printf '\037')
+  printf '%s%s%s%s%s%s%s' "$1" "$us" "$2" "$us" "$3" "$us" "$4"
+}
+
+# Publica el push de petición. Cuerpo machine-splittable para el reloj; X-Title
+# legible para el móvil. $1=id $2=label $3=tool $4=summary
 bridge_publish() {
-  local id="$1" title="$2" body="$3"
+  local id="$1" label="$2" tool="$3" summary="$4"
   curl -fsS \
     ${BRIDGE_TOKEN:+-H "Authorization: Bearer $BRIDGE_TOKEN"} \
-    -H "Title: $title" \
+    -H "X-Title: $label" \
     -H "Tags: warning" \
     -H "X-Request-Id: $id" \
     -H "Actions: $(bridge_actions "$id")" \
-    -d "$body" \
+    --data-binary "$(bridge_request_body "$id" "$label" "$tool" "$summary")" \
     "$BRIDGE_NTFY_BASE/$BRIDGE_TOPIC_REQ" >/dev/null
 }
 
@@ -139,42 +237,84 @@ bridge_emit() {
   '
 }
 
+# Decisión de reserva cuando el bridge no responde (timeout) o está sin
+# configurar. En modos NO interactivos (bypassPermissions, dontAsk) un "ask" de
+# hook no abre diálogo y el comando peligroso se ejecutaría igual; un "deny" sí
+# se respeta incluso en bypass. Así el fail-safe es seguro en full-auto. En modos
+# interactivos delega al terminal con "ask". $1=permission_mode (vacío = ask).
+bridge_fallback_decision() {
+  case "$1" in
+    bypassPermissions|dontAsk) printf deny ;;
+    *)                         printf ask  ;;
+  esac
+}
+
 # Núcleo: lee la entrada de PreToolUse por stdin, decide vía ntfy y emite el JSON.
 bridge_decide() {
-  local input tool summary id start decision
+  local input tool summary id start decision mode cwd session_id label
   input=$(cat)
+  session_id=$(jq -r '.session_id // ""' <<<"$input")
+  # Opt-in por sesión: solo las sesiones vigiladas escalan; el resto pasa de largo.
+  bridge_is_watched "$session_id" || return 0
   tool=$(jq -r '.tool_name // "?"' <<<"$input")
+  mode=$(jq -r '.permission_mode // ""' <<<"$input")
   # Solo lo peligroso va a la muñeca; lo seguro pasa de largo (sin push ni
   # bloqueo). En bypass, eso significa que se ejecuta como siempre.
   bridge_is_dangerous "$tool" "$input" || return 0
   summary=$(bridge_summary "$tool" "$input")
+  cwd=$(jq -r '.cwd // ""' <<<"$input")
+  label=$(bridge_session_label "$cwd" "$session_id")
   id=$(bridge_id)
   start=$(date +%s)
   # Diagnóstico/E2E: el id viaja en el push (X-Request-Id) y hace falta para
   # responder. Lo trazamos por stderr (no afecta a la decisión del hook).
   bridge_log "id=$id tool=$tool → responde \"$id allow|deny\" en ${BRIDGE_TOPIC_DEC:-?}"
-  bridge_publish "$id" "Claude: aprobar $tool" "$summary"
+  bridge_publish "$id" "$label" "$tool" "$summary"
   decision=$(bridge_wait_decision "$id" "$start" || true)
   case "$decision" in
     allow) bridge_emit allow "" ;;
     deny)  bridge_emit deny  "Denegado desde la muñeca" ;;
-    *)     bridge_emit ask   "Sin respuesta del bridge (timeout); decide en el terminal" ;;
+    *)
+      if [ "$(bridge_fallback_decision "$mode")" = deny ]; then
+        bridge_emit deny "Sin respuesta del bridge (timeout) en modo $mode; denegado por seguridad"
+      else
+        bridge_emit ask "Sin respuesta del bridge (timeout); decide en el terminal"
+      fi
+      ;;
   esac
 }
 
 # ---- Reprompt al terminar una tarea (hook Stop) ----
 
-# Último mensaje de texto del asistente en el transcript (el resumen final).
+# Resumen final para el push. El stdin de Stop trae el último mensaje del
+# asistente en .last_assistant_message; si falta (versión antigua), cae al parseo
+# del transcript. Si ese mensaje acaba con la centinela del skill watch-summary
+# (línea "WATCH: ..."), se prefiere esa línea, sin el tag y capada a 200, para que
+# el usuario nunca vea "WATCH:". Si no hay centinela, devuelve el texto completo
+# (lo recorta el caller). $1 = JSON de entrada del hook Stop.
 bridge_last_assistant() {
-  local transcript="$1"
-  [ -f "$transcript" ] || return 0
-  jq -rs '
-    [ .[] | select(.type=="assistant")
-      | (if (.message.content|type)=="array"
-         then ([.message.content[]?|select(.type=="text")|.text]|join("\n"))
-         else (.message.content // "") end) ]
-    | map(select(. != "")) | last // ""
-  ' "$transcript" 2>/dev/null || true
+  local input="$1" raw transcript watch
+  raw=$(jq -r '.last_assistant_message // ""' <<<"$input" 2>/dev/null) || true
+  if [ -z "$raw" ]; then
+    transcript=$(jq -r '.transcript_path // ""' <<<"$input" 2>/dev/null) || true
+    if [ -f "$transcript" ]; then
+      raw=$(jq -rs '
+        [ .[] | select(.type=="assistant")
+          | (if (.message.content|type)=="array"
+             then ([.message.content[]?|select(.type=="text")|.text]|join("\n"))
+             else (.message.content // "") end) ]
+        | map(select(. != "")) | last // ""
+      ' "$transcript" 2>/dev/null) || true
+    fi
+  fi
+  watch=$(printf '%s\n' "$raw" | grep -E '^[[:space:]]*WATCH:' | tail -n1 || true)
+  if [ -n "$watch" ]; then
+    watch=${watch#*WATCH:}
+    watch=${watch# }
+    printf '%s' "$watch" | cut -c1-200
+  else
+    printf '%s' "$raw"
+  fi
 }
 
 # Botones de reprompt predefinido (publican texto en el topic REPROMPT). Máx. 3.
@@ -216,15 +356,15 @@ bridge_emit_continue() {
   jq -nc --arg r "$1" '{decision: "block", reason: $r}'
 }
 
-# Núcleo del hook Stop: si el modo reprompt está activo (flag), avisa con el
-# resumen y espera un reprompt; si llega, hace continuar a Claude. Si no, calla
-# (deja parar). Lee la entrada del hook Stop por stdin.
+# Núcleo del hook Stop: si la sesión está vigilada, avisa con el resumen y espera
+# un reprompt; si llega, hace continuar a Claude. Si no, calla (deja parar). Lee
+# la entrada del hook Stop por stdin.
 bridge_reprompt() {
-  local input transcript summary text start
+  local input session_id summary text start
   input=$(cat)
-  [ -e "${BRIDGE_REPROMPT_FLAG}" ] || return 0   # opt-in: sin flag, no molesta
-  transcript=$(jq -r '.transcript_path // ""' <<<"$input")
-  summary=$(bridge_last_assistant "$transcript" | tr '\n' ' ' | cut -c1-300)
+  session_id=$(jq -r '.session_id // ""' <<<"$input")
+  bridge_is_watched "$session_id" || return 0   # opt-in por sesión: si no, no molesta
+  summary=$(bridge_last_assistant "$input" | tr '\n' ' ' | cut -c1-300)
   [ -n "$summary" ] || summary="(tarea terminada)"
   start=$(date +%s)
   bridge_log "reprompt: aviso enviado; espero ${BRIDGE_REPROMPT_TIMEOUT}s en ${BRIDGE_TOPIC_REPROMPT:-?}"

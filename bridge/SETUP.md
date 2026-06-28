@@ -132,8 +132,9 @@ Usa algo inofensivo: si por lo que sea la base no frena, el comando se ejecutar�
 Recibe un push con el resumen final cuando Claude acaba, y respóndele desde el
 reloj para que continúe.
 
-**Importante (opt-in):** el hook `Stop` se dispara al final de **cada** turno, así
-que solo actúa si activas el modo reprompt. Si no, no molesta.
+**Importante (opt-in por sesión):** el hook `Stop` se dispara al final de **cada**
+turno, así que solo actúa en sesiones **vigiladas**. Marcas una sesión con
+`/watch on` (mismo flag que el reenvío de permisos); el resto no molesta.
 
 1. **Topic de vuelta**: genera `BRIDGE_TOPIC_REPROMPT`
    (`dotmesh-claude-rep-$(openssl rand -hex 12)`) y ponlo en `.env`.
@@ -145,11 +146,17 @@ que solo actúa si activas el modo reprompt. Si no, no molesta.
        "timeout": 320 } ] } ] } }
    ```
    (Pon `timeout` mayor que `BRIDGE_REPROMPT_TIMEOUT`.)
-3. **Activa/desactiva** cuando vayas a dejar algo corriendo:
-   ```bash
-   bridge/approver/reprompt.sh on    # … off / status
+3. **Registra el hook `UserPromptSubmit`** (sin matcher) para que `/watch` funcione:
+   ```json
+   { "hooks": { "UserPromptSubmit": [ { "hooks": [
+     { "type": "command",
+       "command": "/home/problemas/Documentos/GitHub/dotmesh-watch/bridge/approver/userpromptsubmit-watch.sh" } ] } ] } }
    ```
-4. **Responder**: el push trae botones **Continúa / Tests / Commit** (publican un
+4. **Vigila la sesión** que vayas a dejar corriendo: escribe `/watch on` en la
+   propia conversación (`/watch off` para dejar de reenviar; `/watch` muestra el
+   estado). Desde el terminal, `bridge/approver/watch.sh on|off` como respaldo.
+   `reprompt.sh` queda como shim deprecado que delega en `watch.sh`.
+5. **Responder**: el push trae botones **Continúa / Tests / Commit** (publican un
    reprompt fijo en el topic REPROMPT). Para **texto libre**, publica cualquier
    mensaje a ese topic desde la app ntfy; ese texto es el reprompt. Desde el
    Garmin, igual que las decisiones: una tarea de Tasker que hace POST del reprompt.
