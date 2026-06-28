@@ -1,6 +1,7 @@
 <strings>
     <string id="AppName">approver</string>
     <string id="SettingBaseUrl">Base ntfy (raíz, p. ej. https://ntfy.sh/)</string>
+    <string id="SettingReqTopic">Topic REQ (peticiones)</string>
     <string id="SettingDecTopic">Topic DEC (decisiones)</string>
     <string id="SettingRepTopic">Topic REP (reprompt)</string>
     <string id="SettingToken">Token (solo self-host; vacío en ntfy.sh)</string>

@@ -8,6 +8,7 @@ class ApproverApp extends Application.AppBase {
     }
 
     function getInitialView() {
-        return [ new ApproverMenu(), new ApproverMenuDelegate() ];
+        var menu = new ApproverMenu();
+        return [ menu, new ApproverMenuDelegate(menu) ];
     }
 }

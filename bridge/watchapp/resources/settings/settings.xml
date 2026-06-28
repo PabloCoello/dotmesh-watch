@@ -2,6 +2,9 @@
     <setting propertyKey="@Properties.baseUrl" title="@Strings.SettingBaseUrl">
         <settingConfig type="alphaNumeric" />
     </setting>
+    <setting propertyKey="@Properties.reqTopic" title="@Strings.SettingReqTopic">
+        <settingConfig type="alphaNumeric" />
+    </setting>
     <setting propertyKey="@Properties.decTopic" title="@Strings.SettingDecTopic">
         <settingConfig type="alphaNumeric" />
     </setting>
