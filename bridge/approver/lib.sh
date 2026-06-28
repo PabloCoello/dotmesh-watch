@@ -15,6 +15,11 @@
 : "${BRIDGE_REPROMPT_TIMEOUT:=300}"
 : "${BRIDGE_REPROMPT_FLAG:=${XDG_CACHE_HOME:-$HOME/.cache}/dotmesh-bridge/reprompt-on}"
 
+# Reenvío por sesión (opt-in). Solo las sesiones marcadas (su flag existe) escalan
+# permisos y disparan el reprompt; las demás pasan de largo. Lo gestionan watch.sh
+# y el hook UserPromptSubmit.
+: "${BRIDGE_FORWARD_DIR:=${XDG_CACHE_HOME:-$HOME/.cache}/dotmesh-bridge}"
+
 # Comandos Bash que SÍ escalan a la muñeca (regex extendida). Lo demás pasa de
 # largo sin push: en bypass se ejecuta como siempre. Override/extiende en .env.
 : "${BRIDGE_DANGER_REGEX:=rm +-[a-zA-Z]*[rf]|--force|--hard|git +clean +-[a-zA-Z]*f|git +branch +-D|sudo +|dd +if=|mkfs|chmod +-R|chown +-R|(curl|wget) +[^|]*\| *(sh|bash)|npm +publish|shutdown|reboot|poweroff|kubectl +delete|terraform +(apply|destroy)|docker +(rm|rmi|system +prune)}"
@@ -78,6 +83,16 @@ bridge_is_dangerous() {
       ;;
     *) return 0 ;;   # herramienta inesperada en el matcher -> por seguridad, escala
   esac
+}
+
+# ¿Está esta sesión vigilada desde la muñeca? El session_id viene del stdin (no
+# confiable) -> se sanea para el nombre del flag (evita path traversal).
+bridge_sid_safe()     { printf '%s' "$1" | tr -cd 'A-Za-z0-9._-'; }
+bridge_forward_flag() { printf '%s/forward-%s' "$BRIDGE_FORWARD_DIR" "$(bridge_sid_safe "$1")"; }
+bridge_is_watched() {
+  local sid="$1"
+  [ -n "$sid" ] || return 1
+  [ -e "$(bridge_forward_flag "$sid")" ]
 }
 
 # Cabecera Actions de ntfy: dos botones que publican la decisión correlacionada
@@ -175,6 +190,9 @@ bridge_fallback_decision() {
 bridge_decide() {
   local input tool summary id start decision mode cwd session_id label
   input=$(cat)
+  session_id=$(jq -r '.session_id // ""' <<<"$input")
+  # Opt-in por sesión: solo las sesiones vigiladas escalan; el resto pasa de largo.
+  bridge_is_watched "$session_id" || return 0
   tool=$(jq -r '.tool_name // "?"' <<<"$input")
   mode=$(jq -r '.permission_mode // ""' <<<"$input")
   # Solo lo peligroso va a la muñeca; lo seguro pasa de largo (sin push ni
@@ -182,7 +200,6 @@ bridge_decide() {
   bridge_is_dangerous "$tool" "$input" || return 0
   summary=$(bridge_summary "$tool" "$input")
   cwd=$(jq -r '.cwd // ""' <<<"$input")
-  session_id=$(jq -r '.session_id // ""' <<<"$input")
   label=$(bridge_session_label "$cwd" "$session_id")
   id=$(bridge_id)
   start=$(date +%s)
@@ -280,9 +297,10 @@ bridge_emit_continue() {
 # resumen y espera un reprompt; si llega, hace continuar a Claude. Si no, calla
 # (deja parar). Lee la entrada del hook Stop por stdin.
 bridge_reprompt() {
-  local input summary text start
+  local input session_id summary text start
   input=$(cat)
-  [ -e "${BRIDGE_REPROMPT_FLAG}" ] || return 0   # opt-in: sin flag, no molesta
+  session_id=$(jq -r '.session_id // ""' <<<"$input")
+  bridge_is_watched "$session_id" || return 0   # opt-in por sesión: si no, no molesta
   summary=$(bridge_last_assistant "$input" | tr '\n' ' ' | cut -c1-300)
   [ -n "$summary" ] || summary="(tarea terminada)"
   start=$(date +%s)

@@ -14,6 +14,11 @@ PUBLISHED_BODY=""
 bridge_publish()       { PUBLISHED_BODY="$(bridge_request_body "$1" "$2" "$3" "$4")"; }
 bridge_wait_decision() { printf '%s' "$FAKE_DECISION"; } # decisión inyectada
 
+# Reenvío por sesión: dir de flags aislado y una sesión de prueba vigilada.
+BRIDGE_FORWARD_DIR=$(mktemp -d)
+TEST_SID=test-session
+: > "$BRIDGE_FORWARD_DIR/forward-$TEST_SID"
+
 fails=0
 check() { # $1=etiqueta $2=esperado $3=obtenido
   if [ "$2" = "$3" ]; then
@@ -25,7 +30,7 @@ check() { # $1=etiqueta $2=esperado $3=obtenido
 
 decide_with() { # $1=decisión simulada $2=json de entrada -> imprime permissionDecision (vacío si pasa de largo)
   FAKE_DECISION="$1"
-  printf '%s' "$2" | bridge_decide | jq -r '.hookSpecificOutput.permissionDecision // empty'
+  printf '%s' "$2" | jq -c --arg s "$TEST_SID" '. + {session_id:$s}' | bridge_decide | jq -r '.hookSpecificOutput.permissionDecision // empty'
 }
 
 # Solo entradas PELIGROSAS llegan a la decisión.
@@ -49,6 +54,16 @@ safe_out=$(decide_with allow '{"tool_name":"Bash","tool_input":{"command":"git s
   && printf 'ok   comando seguro pasa de largo\n' \
   || { printf 'FAIL comando seguro no pasó de largo (out=[%s] body=[%s])\n' "$safe_out" "$PUBLISHED_BODY"; fails=$((fails+1)); }
 
+# Reenvío por sesión (B1): una sesión NO vigilada no escala ni con comando peligroso.
+unwatched_out=$( FAKE_DECISION=allow; printf '%s' '{"tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/x"},"session_id":"no-vigilada"}' | bridge_decide | jq -r '.hookSpecificOutput.permissionDecision // empty' )
+[ -z "$unwatched_out" ] \
+  && printf 'ok   sesión no vigilada pasa de largo\n' \
+  || { printf 'FAIL no vigilada escaló (out=[%s])\n' "$unwatched_out"; fails=$((fails+1)); }
+check "is_watched vigilada"    si "$(bridge_is_watched "$TEST_SID" && echo si || echo no)"
+check "is_watched no vigilada" no "$(bridge_is_watched no-vigilada && echo si || echo no)"
+check "is_watched vacío"       no "$(bridge_is_watched '' && echo si || echo no)"
+case "$(bridge_sid_safe '../../etc/passwd')" in */*) printf 'FAIL sid_safe deja slashes\n'; fails=$((fails+1)) ;; *) printf 'ok   sid_safe sin slashes\n' ;; esac
+
 # El clasificador de peligro.
 is_dangerous() { bridge_is_dangerous "$1" "$2" && echo si || echo no; }
 check "peligro: rm -rf"      si "$(is_dangerous Bash '{"tool_input":{"command":"rm -rf build"}}')"
@@ -61,14 +76,14 @@ check "Write fuera escala"   si "$(is_dangerous Write '{"cwd":"/home/p/proj","to
 check "Write .ssh escala"    si "$(is_dangerous Edit  '{"cwd":"/home/p/proj","tool_input":{"file_path":"/home/p/.ssh/config"}}')"
 
 # La razón aparece al denegar y no al permitir.
-reason_deny=$(FAKE_DECISION=deny; printf '%s' '{"tool_name":"Bash","tool_input":{"command":"rm -rf x"}}' | bridge_decide | jq -r '.hookSpecificOutput.permissionDecisionReason // ""')
+reason_deny=$(FAKE_DECISION=deny; printf '%s' '{"tool_name":"Bash","tool_input":{"command":"rm -rf x"},"session_id":"test-session"}' | bridge_decide | jq -r '.hookSpecificOutput.permissionDecisionReason // ""')
 [ -n "$reason_deny" ] && printf 'ok   deny lleva razón\n' || { printf 'FAIL deny sin razón\n'; fails=$((fails+1)); }
 
 # El resumen de Write NO filtra contenido: solo la ruta.
 # (here-string, no pipe: el pipe correría bridge_decide en un subshell y
 #  PUBLISHED_BODY no subiría al shell padre).
 FAKE_DECISION=allow
-bridge_decide >/dev/null <<<'{"tool_name":"Write","tool_input":{"file_path":"/secreto.txt","content":"CLAVE-SUPERSECRETA"}}'
+bridge_decide >/dev/null <<<'{"tool_name":"Write","tool_input":{"file_path":"/secreto.txt","content":"CLAVE-SUPERSECRETA"},"session_id":"test-session"}'
 case "$PUBLISHED_BODY" in
   *CLAVE-SUPERSECRETA*) printf 'FAIL el push filtró contenido del fichero\n'; fails=$((fails+1)) ;;
 esac
@@ -77,7 +92,7 @@ check "Write solo publica la ruta" "/secreto.txt" "${PUBLISHED_BODY##*$US}"
 # El resumen de Bash recorta a 200 caracteres (el summary es el último campo).
 FAKE_DECISION=allow
 long="sudo $(printf 'a%.0s' {1..400})"
-bridge_decide >/dev/null <<<"{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"$long\"}}"
+bridge_decide >/dev/null <<<"{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"$long\"},\"session_id\":\"test-session\"}"
 sumf="${PUBLISHED_BODY##*$US}"
 [ "${#sumf}" -le 200 ] && printf 'ok   Bash recorta a ≤200\n' || { printf 'FAIL Bash no recorta (%s)\n' "${#sumf}"; fails=$((fails+1)); }
 
@@ -153,24 +168,24 @@ out_w=$(bridge_last_assistant "$(jq -nc --arg m "$longw" '{last_assistant_messag
 check "centinela última gana" "segunda" \
   "$(bridge_last_assistant '{"last_assistant_message":"WATCH: primera\nWATCH: segunda"}')"
 
-# bridge_reprompt con transporte simulado.
+# bridge_reprompt: opt-in POR SESIÓN (vigilada). Transporte simulado.
 bridge_publish_reprompt() { :; }
 REPROMPT_TEXT=""
 bridge_wait_reprompt() { printf '%s' "$REPROMPT_TEXT"; }
 BRIDGE_TOPIC_REPROMPT=rep1
+WATCHED_IN=$(jq -nc --arg s "$TEST_SID" '{transcript_path:"",session_id:$s}')
+UNWATCHED_IN='{"transcript_path":"","session_id":"no-vigilada"}'
 
-flag_on=$(mktemp)            # existe -> modo ON
-BRIDGE_REPROMPT_FLAG="$flag_on"; REPROMPT_TEXT="ejecuta los tests"
-check "reprompt on+texto→block" block "$(bridge_reprompt <<<'{"transcript_path":""}' | jq -r '.decision // empty')"
+REPROMPT_TEXT="ejecuta los tests"
+check "reprompt vigilada+texto→block" block "$(bridge_reprompt <<<"$WATCHED_IN" | jq -r '.decision // empty')"
 
-BRIDGE_REPROMPT_FLAG="$flag_on"; REPROMPT_TEXT=""   # ON pero sin respuesta
-out_to=$(bridge_reprompt <<<'{"transcript_path":""}')
-[ -z "$out_to" ] && printf 'ok   reprompt on+timeout→para\n' || { printf 'FAIL reprompt timeout emitió [%s]\n' "$out_to"; fails=$((fails+1)); }
-rm -f "$flag_on"
+REPROMPT_TEXT=""   # vigilada pero sin respuesta -> para
+out_to=$(bridge_reprompt <<<"$WATCHED_IN")
+[ -z "$out_to" ] && printf 'ok   reprompt vigilada+timeout→para\n' || { printf 'FAIL reprompt timeout emitió [%s]\n' "$out_to"; fails=$((fails+1)); }
 
-BRIDGE_REPROMPT_FLAG="$(mktemp -u)"; REPROMPT_TEXT="lo que sea"   # flag inexistente -> OFF
-out_off=$(bridge_reprompt <<<'{"transcript_path":""}')
-[ -z "$out_off" ] && printf 'ok   reprompt off→no molesta\n' || { printf 'FAIL reprompt off emitió [%s]\n' "$out_off"; fails=$((fails+1)); }
+REPROMPT_TEXT="lo que sea"   # sesión no vigilada -> no molesta
+out_off=$(bridge_reprompt <<<"$UNWATCHED_IN")
+[ -z "$out_off" ] && printf 'ok   reprompt no vigilada→no molesta\n' || { printf 'FAIL reprompt no vigilada emitió [%s]\n' "$out_off"; fails=$((fails+1)); }
 
 echo "---"
 if [ "$fails" -eq 0 ]; then echo "todos los tests OK"; else echo "$fails test(s) fallidos"; exit 1; fi
