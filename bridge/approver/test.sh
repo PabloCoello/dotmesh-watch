@@ -31,6 +31,15 @@ check "allow"        allow "$(decide_with allow '{"tool_name":"Bash","tool_input
 check "deny"         deny  "$(decide_with deny  '{"tool_name":"Bash","tool_input":{"command":"git push --force"}}')"
 check "timeout→ask"  ask   "$(decide_with ''    '{"tool_name":"Write","tool_input":{"file_path":"/etc/hosts"}}')"
 
+# Fail-safe por modo de permisos: un "ask" de hook NO frena en bypass, así que en
+# timeout/misconfig se deniega en modos no interactivos; en interactivos, "ask".
+check "fallback bypass→deny"  deny "$(bridge_fallback_decision bypassPermissions)"
+check "fallback dontAsk→deny" deny "$(bridge_fallback_decision dontAsk)"
+check "fallback default→ask"  ask  "$(bridge_fallback_decision default)"
+check "fallback vacío→ask"    ask  "$(bridge_fallback_decision '')"
+check "timeout bypass→deny" deny "$(decide_with '' '{"tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/x"},"permission_mode":"bypassPermissions"}')"
+check "timeout default→ask" ask  "$(decide_with '' '{"tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/x"},"permission_mode":"default"}')"
+
 # Lo SEGURO pasa de largo: sin salida, sin push.
 PUBLISHED_BODY="(sin tocar)"
 safe_out=$(decide_with allow '{"tool_name":"Bash","tool_input":{"command":"git status"}}')

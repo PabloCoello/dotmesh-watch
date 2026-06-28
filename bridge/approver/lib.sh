@@ -139,11 +139,24 @@ bridge_emit() {
   '
 }
 
+# Decisión de reserva cuando el bridge no responde (timeout) o está sin
+# configurar. En modos NO interactivos (bypassPermissions, dontAsk) un "ask" de
+# hook no abre diálogo y el comando peligroso se ejecutaría igual; un "deny" sí
+# se respeta incluso en bypass. Así el fail-safe es seguro en full-auto. En modos
+# interactivos delega al terminal con "ask". $1=permission_mode (vacío = ask).
+bridge_fallback_decision() {
+  case "$1" in
+    bypassPermissions|dontAsk) printf deny ;;
+    *)                         printf ask  ;;
+  esac
+}
+
 # Núcleo: lee la entrada de PreToolUse por stdin, decide vía ntfy y emite el JSON.
 bridge_decide() {
-  local input tool summary id start decision
+  local input tool summary id start decision mode
   input=$(cat)
   tool=$(jq -r '.tool_name // "?"' <<<"$input")
+  mode=$(jq -r '.permission_mode // ""' <<<"$input")
   # Solo lo peligroso va a la muñeca; lo seguro pasa de largo (sin push ni
   # bloqueo). En bypass, eso significa que se ejecuta como siempre.
   bridge_is_dangerous "$tool" "$input" || return 0
@@ -158,7 +171,13 @@ bridge_decide() {
   case "$decision" in
     allow) bridge_emit allow "" ;;
     deny)  bridge_emit deny  "Denegado desde la muñeca" ;;
-    *)     bridge_emit ask   "Sin respuesta del bridge (timeout); decide en el terminal" ;;
+    *)
+      if [ "$(bridge_fallback_decision "$mode")" = deny ]; then
+        bridge_emit deny "Sin respuesta del bridge (timeout) en modo $mode; denegado por seguridad"
+      else
+        bridge_emit ask "Sin respuesta del bridge (timeout); decide en el terminal"
+      fi
+      ;;
   esac
 }
 
