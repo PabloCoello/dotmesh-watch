@@ -106,9 +106,9 @@ class ApproverMenuDelegate extends WatchUi.Menu2InputDelegate {
     function onSelect(item) {
         var id = item.getId();
         if (id == :allow) {
-            send("decTopic", "allow");
+            decide("allow");
         } else if (id == :deny) {
-            send("decTopic", "deny");
+            decide("deny");
         } else if (id == :cont) {
             send("repTopic", "continúa con lo siguiente");
         } else if (id == :tests) {
@@ -122,6 +122,19 @@ class ApproverMenuDelegate extends WatchUi.Menu2InputDelegate {
 
     function onBack() {
         WatchUi.popView(WatchUi.SLIDE_RIGHT);
+    }
+
+    // Responde el permiso correlacionando por id: publica "<id> allow|deny" en el
+    // topic DEC (la forma que reconoce bridge_match del host, segura con varias
+    // sesiones). Sin petición leída, avisa y no envía nada.
+    function decide(verdict) {
+        if (Bridge.pending == null) {
+            WatchUi.showToast("Sin petición; Actualizar", null);
+            return;
+        }
+        var rec = Bridge.pending as Lang.Dictionary;
+        var pid = rec[:id] as Lang.String;
+        send("decTopic", pid + " " + verdict);
     }
 
     // Publica "message" en el topic configurado, usando el modo publish-as-JSON
