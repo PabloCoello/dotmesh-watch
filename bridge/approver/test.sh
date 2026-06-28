@@ -112,14 +112,17 @@ case "$ra" in
   *) printf 'FAIL reprompt actions [%s]\n' "$ra"; fails=$((fails+1)) ;;
 esac
 
-# Último mensaje del asistente del transcript (resumen final).
+# Resumen final: bridge_last_assistant recibe el JSON de stdin de Stop.
+# Vía directa: usa .last_assistant_message si viene.
+check "last assistant directo" "directo" "$(bridge_last_assistant '{"last_assistant_message":"directo"}')"
+# Vía fallback: sin el campo, parsea el último assistant del transcript.
 tf=$(mktemp)
 printf '%s\n' \
   '{"type":"user","message":{"content":"hola"}}' \
   '{"type":"assistant","message":{"content":[{"type":"text","text":"primero"}]}}' \
   '{"type":"assistant","message":{"content":[{"type":"text","text":"resumen final"}]}}' \
   '{"type":"user","message":{"content":[{"type":"tool_result","content":"x"}]}}' > "$tf"
-check "last assistant" "resumen final" "$(bridge_last_assistant "$tf")"
+check "last assistant fallback" "resumen final" "$(bridge_last_assistant "$(jq -nc --arg t "$tf" '{transcript_path:$t}')")"
 rm -f "$tf"
 
 # bridge_reprompt con transporte simulado.

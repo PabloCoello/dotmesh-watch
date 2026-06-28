@@ -183,9 +183,17 @@ bridge_decide() {
 
 # ---- Reprompt al terminar una tarea (hook Stop) ----
 
-# Último mensaje de texto del asistente en el transcript (el resumen final).
+# Resumen final (último mensaje de texto del asistente). El stdin de Stop ya lo
+# trae en .last_assistant_message; si falta (versión antigua), cae al parseo del
+# transcript. $1 = JSON de entrada del hook Stop.
 bridge_last_assistant() {
-  local transcript="$1"
+  local input="$1" msg transcript
+  msg=$(jq -r '.last_assistant_message // ""' <<<"$input" 2>/dev/null) || true
+  if [ -n "$msg" ]; then
+    printf '%s' "$msg"
+    return 0
+  fi
+  transcript=$(jq -r '.transcript_path // ""' <<<"$input" 2>/dev/null) || true
   [ -f "$transcript" ] || return 0
   jq -rs '
     [ .[] | select(.type=="assistant")
@@ -239,11 +247,10 @@ bridge_emit_continue() {
 # resumen y espera un reprompt; si llega, hace continuar a Claude. Si no, calla
 # (deja parar). Lee la entrada del hook Stop por stdin.
 bridge_reprompt() {
-  local input transcript summary text start
+  local input summary text start
   input=$(cat)
   [ -e "${BRIDGE_REPROMPT_FLAG}" ] || return 0   # opt-in: sin flag, no molesta
-  transcript=$(jq -r '.transcript_path // ""' <<<"$input")
-  summary=$(bridge_last_assistant "$transcript" | tr '\n' ' ' | cut -c1-300)
+  summary=$(bridge_last_assistant "$input" | tr '\n' ' ' | cut -c1-300)
   [ -n "$summary" ] || summary="(tarea terminada)"
   start=$(date +%s)
   bridge_log "reprompt: aviso enviado; espero ${BRIDGE_REPROMPT_TIMEOUT}s en ${BRIDGE_TOPIC_REPROMPT:-?}"
