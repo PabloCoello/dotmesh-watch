@@ -164,6 +164,55 @@ turno, así que solo actúa en sesiones **vigiladas**. Marcas una sesión con
 Si respondes, Claude continúa con esa instrucción (`{"decision":"block"}`); si no
 respondes en `BRIDGE_REPROMPT_TIMEOUT`, para normal.
 
+## Reflejar preguntas y avisos del arnés (hooks AskUserQuestion y Notification)
+
+Dos hooks más que llevan al reloj lo que pasa en la conversación sin que tengas que
+mirar la pantalla. El de preguntas es opt-in por sesión (solo en sesiones vigiladas);
+el de avisos no (ver el detalle de cada uno abajo).
+
+**Preguntas del arnés (`AskUserQuestion`).** Cuando Claude te pregunta con su menú,
+el hook `pretooluse-ask.sh` refleja la pregunta y sus opciones al reloj. Por defecto
+es **solo aviso** (E4): la respondes en el terminal como siempre. Regístralo con su
+matcher (separado del de aprobación, que trataría mal esta herramienta):
+
+```json
+{ "hooks": { "PreToolUse": [ {
+  "matcher": "AskUserQuestion",
+  "hooks": [ { "type": "command",
+    "command": "/home/problemas/Documentos/GitHub/dotmesh-watch/bridge/approver/pretooluse-ask.sh",
+    "timeout": 310 } ] } ] } }
+```
+
+Responder desde la muñeca (E3) es **opt-in extra**: pon `BRIDGE_ANSWER_QUESTIONS=1`
+en `.env`. Solo cubre menús de **una sola** pregunta y **sin** multiSelect; el resto
+cae al aviso. El push lleva las opciones numeradas; respondes publicando en el topic
+DEC `"<id> <n>"` (índice) o `"<id> <label>"`, igual que un allow/deny. Si no
+respondes en `BRIDGE_TIMEOUT`, la pregunta sigue viva en el terminal.
+
+> **Antes de activar E3:** falta confirmar en vivo que el arnés acepta la respuesta
+> one-shot en una TUI interactiva (no `claude -p`). El spike está en
+> `.ai/tmp/spike-ask/` (`RUNBOOK.md`). Hasta tener ese GO, deja
+> `BRIDGE_ANSWER_QUESTIONS=0`: el aviso (E4) funciona igual.
+
+**Avisos (`Notification`).** El hook `notification-notify.sh` refleja los avisos del
+arnés (inactividad y permiso). No puede responder; es solo aviso. Regístralo **dos
+veces**, una por matcher, pasando el tipo como argumento:
+
+```json
+{ "hooks": { "Notification": [
+  { "matcher": "idle_prompt",
+    "hooks": [ { "type": "command",
+      "command": "/home/problemas/Documentos/GitHub/dotmesh-watch/bridge/approver/notification-notify.sh idle_prompt" } ] },
+  { "matcher": "permission_prompt",
+    "hooks": [ { "type": "command",
+      "command": "/home/problemas/Documentos/GitHub/dotmesh-watch/bridge/approver/notification-notify.sh permission_prompt" } ] }
+] } }
+```
+
+`idle_prompt` se **suprime en sesiones vigiladas** (el push del reprompt del hook
+`Stop` ya avisa de que Claude espera; así no llega por duplicado). `permission_prompt`
+avisa siempre, aunque en `bypassPermissions` casi nunca se dispara.
+
 ## Qué escala a la muñeca (y qué no)
 
 El hook **no** manda push por cada Bash/Write/Edit — eso sería insoportable en

@@ -228,5 +228,156 @@ ctx_w=$(printf '%s' '{"session_id":"test-session","cwd":"/tmp/x","prompt":"haz a
 ctx_u=$(printf '%s' '{"session_id":"no-vigilada","cwd":"/tmp/x","prompt":"haz algo"}' | BRIDGE_FORWARD_DIR="$BRIDGE_FORWARD_DIR" bash "$WATCH_HOOK")
 [ -z "$ctx_u" ] && printf 'ok   sesión no vigilada no inyecta\n' || { printf 'FAIL no vigilada inyectó [%s]\n' "$ctx_u"; fails=$((fails+1)); }
 
+# ---- E4: mirror read-only de AskUserQuestion ----
+# Dobles: capturan lo que el host publicaría, sin red.
+MIRROR_BODY="__none__"
+bridge_mirror_question() { MIRROR_BODY=$(bridge_question_summary "$1"); }
+
+Q_INPUT=$(jq -nc --arg s "$TEST_SID" '
+  { session_id:$s, cwd:"/home/p/proj",
+    tool_input:{ questions:[ { header:"Rama", question:"¿A o B?", multiSelect:false,
+      options:[ {label:"opcA", description:"DESCRIPCION-SECRETA-A"},
+                {label:"opcB", description:"DESCRIPCION-SECRETA-B"} ] } ] } }')
+
+qsum=$(bridge_question_summary "$Q_INPUT")
+case "$qsum" in *"¿A o B?"*) printf 'ok   question_summary lleva el enunciado\n' ;; *) printf 'FAIL question_summary sin enunciado [%s]\n' "$qsum"; fails=$((fails+1)) ;; esac
+case "$qsum" in *opcA*opcB*) printf 'ok   question_summary lleva las labels\n' ;; *) printf 'FAIL question_summary sin labels [%s]\n' "$qsum"; fails=$((fails+1)) ;; esac
+case "$qsum" in *DESCRIPCION-SECRETA*) printf 'FAIL question_summary filtró las descripciones\n'; fails=$((fails+1)) ;; *) printf 'ok   question_summary no filtra descripciones\n' ;; esac
+
+# Enunciado largo: recorta a <=300; y US/saltos se colapsan a espacio (no pueden
+# ensuciar el cuerpo machine-splittable del reloj).
+longq=$(jq -nc '{tool_input:{questions:[{question:("x"*500),options:[]}]}}')
+sl=$(bridge_question_summary "$longq")
+[ "${#sl}" -le 300 ] && printf 'ok   question_summary recorta a <=300\n' || { printf 'FAIL question_summary no recorta (%s)\n' "${#sl}"; fails=$((fails+1)); }
+usq=$(jq -nc '{tool_input:{questions:[{question:"ab\nc",options:[]}]}}')
+case "$(bridge_question_summary "$usq")" in *$US*|*$'\n'*) printf 'FAIL question_summary no colapsa US/saltos\n'; fails=$((fails+1)) ;; *) printf 'ok   question_summary colapsa US/saltos\n' ;; esac
+# Sin preguntas (vacío o ausente): summary vacío.
+check "question_summary questions vacío" "" "$(bridge_question_summary '{"tool_input":{"questions":[]}}')"
+check "question_summary sin tool_input"  "" "$(bridge_question_summary '{}')"
+
+# E4 (modo por defecto, sin BRIDGE_ANSWER_QUESTIONS): refleja y NO responde.
+# (Redirección a fichero, no $(...): el subshell de la sustitución se comería el
+#  efecto lateral MIRROR_BODY, como ya pasa con PUBLISHED_BODY arriba.)
+ASK_OUT=$(mktemp)
+MIRROR_BODY="__none__"
+bridge_ask "$Q_INPUT" > "$ASK_OUT"
+e4_out=$(cat "$ASK_OUT")
+[ -z "$e4_out" ] && [ "$MIRROR_BODY" != "__none__" ] \
+  && printf 'ok   E4 refleja la pregunta y no responde\n' \
+  || { printf 'FAIL E4 (out=[%s] body=[%s])\n' "$e4_out" "$MIRROR_BODY"; fails=$((fails+1)); }
+
+# Sesión no vigilada: ni refleja ni responde.
+MIRROR_BODY="__none__"
+e4_unw=$(bridge_ask "$(jq -c '.session_id="no-vigilada"' <<<"$Q_INPUT")")
+[ -z "$e4_unw" ] && [ "$MIRROR_BODY" = "__none__" ] \
+  && printf 'ok   pregunta de sesión no vigilada pasa de largo\n' \
+  || { printf 'FAIL no vigilada reflejó (out=[%s] body=[%s])\n' "$e4_unw" "$MIRROR_BODY"; fails=$((fails+1)); }
+
+# ---- E3: responder AskUserQuestion desde la muñeca (flag-gated) ----
+check "answerable única/no-multi" si "$(bridge_question_answerable "$Q_INPUT" && echo si || echo no)"
+multiq=$(jq -c '.tool_input.questions[0].multiSelect=true' <<<"$Q_INPUT")
+check "answerable multiSelect→no" no "$(bridge_question_answerable "$multiq" && echo si || echo no)"
+twoq=$(jq -c '.tool_input.questions += [{question:"¿C o D?",multiSelect:false,options:[{label:"C"},{label:"D"}]}]' <<<"$Q_INPUT")
+check "answerable 2 preguntas→no" no "$(bridge_question_answerable "$twoq" && echo si || echo no)"
+# Multi-pregunta: el mirror E4 sí refleja las dos, unidas por " / ".
+qsum2=$(bridge_question_summary "$twoq")
+case "$qsum2" in *" / "*"¿C o D?"*) printf 'ok   question_summary une multi-pregunta\n' ;; *) printf 'FAIL question_summary multi-pregunta [%s]\n' "$qsum2"; fails=$((fails+1)) ;; esac
+
+check "match_answer índice 1"   opcA "$(bridge_match_answer qid 'qid 1' "$Q_INPUT")"
+check "match_answer índice 2"   opcB "$(bridge_match_answer qid 'qid 2' "$Q_INPUT")"
+check "match_answer label"      opcB "$(bridge_match_answer qid 'qid OPCB' "$Q_INPUT")"
+check "match_answer rango alto"  "" "$(bridge_match_answer qid 'qid 9' "$Q_INPUT")"
+# Índice 0 NO debe elegir la última opción (options[-1] de jq); cae a vacío.
+check "match_answer índice 0"    "" "$(bridge_match_answer qid 'qid 0' "$Q_INPUT")"
+check "match_answer cero a izq"  "" "$(bridge_match_answer qid 'qid 01' "$Q_INPUT")"
+check "match_answer otro id"     "" "$(bridge_match_answer qid 'otro 1' "$Q_INPUT")"
+check "match_answer basura"      "" "$(bridge_match_answer qid 'qid loquesea' "$Q_INPUT")"
+# Label con espacios/coma: el pelado del prefijo no tokeniza, casa la label entera.
+q2=$(jq -nc '{tool_input:{questions:[{question:"¿?",multiSelect:false,options:[{label:"opc larga"},{label:"otra, con coma"}]}]}}')
+check "match_answer label espacios" "opc larga"      "$(bridge_match_answer qid 'qid opc larga' "$q2")"
+check "match_answer label coma"     "otra, con coma" "$(bridge_match_answer qid 'qid otra, con coma' "$q2")"
+
+ai=$(bridge_answer_input "$Q_INPUT" opcA)
+check "answer_input answers"   opcA "$(jq -r '.answers["¿A o B?"]' <<<"$ai")"
+check "answer_input conserva questions" "¿A o B?" "$(jq -r '.questions[0].question' <<<"$ai")"
+ea=$(bridge_emit_answer "$ai")
+check "emit_answer decision allow"  allow            "$(jq -r '.hookSpecificOutput.permissionDecision' <<<"$ea")"
+check "emit_answer event"           PreToolUse       "$(jq -r '.hookSpecificOutput.hookEventName' <<<"$ea")"
+check "emit_answer lleva answers"   opcA             "$(jq -r '.hookSpecificOutput.updatedInput.answers["¿A o B?"]' <<<"$ea")"
+
+# Cuerpo del push de la pregunta (E3): lleva opciones numeradas + instrucción con el
+# id, y NO filtra las descripciones de las opciones.
+qprompt=$(bridge_question_prompt qid "$Q_INPUT")
+case "$qprompt" in *"1) opcA"*"2) opcB"*) printf 'ok   question_prompt numera las opciones\n' ;; *) printf 'FAIL question_prompt sin opciones numeradas [%s]\n' "$qprompt"; fails=$((fails+1)) ;; esac
+case "$qprompt" in *"qid"*) printf 'ok   question_prompt lleva el id\n' ;; *) printf 'FAIL question_prompt sin id\n'; fails=$((fails+1)) ;; esac
+case "$qprompt" in *DESCRIPCION-SECRETA*) printf 'FAIL question_prompt filtró las descripciones\n'; fails=$((fails+1)) ;; *) printf 'ok   question_prompt no filtra descripciones\n' ;; esac
+
+# bridge_ask en modo E3: con flag + DEC + pregunta respondible, responde allow.
+bridge_publish_question() { :; }            # no red
+ANSWER_CHOICE="opcB"
+bridge_wait_answer() { printf '%s' "$ANSWER_CHOICE"; }
+e3_out=$(BRIDGE_ANSWER_QUESTIONS=1 BRIDGE_TOPIC_DEC=dec1 bridge_ask "$Q_INPUT")
+check "E3 responde allow"        allow "$(jq -r '.hookSpecificOutput.permissionDecision // empty' <<<"$e3_out")"
+check "E3 inyecta la elección"   opcB  "$(jq -r '.hookSpecificOutput.updatedInput.answers["¿A o B?"] // empty' <<<"$e3_out")"
+
+# Timeout en E3: sin elección -> sin stdout (la pregunta sigue en el terminal).
+ANSWER_CHOICE=""
+e3_to=$(BRIDGE_ANSWER_QUESTIONS=1 BRIDGE_TOPIC_DEC=dec1 bridge_ask "$Q_INPUT")
+[ -z "$e3_to" ] && printf 'ok   E3 timeout no responde (cae al terminal)\n' || { printf 'FAIL E3 timeout emitió [%s]\n' "$e3_to"; fails=$((fails+1)); }
+
+# E3 con pregunta NO respondible (multiSelect) -> cae al mirror read-only (E4).
+MIRROR_BODY="__none__"; ANSWER_CHOICE="opcB"
+BRIDGE_ANSWER_QUESTIONS=1 BRIDGE_TOPIC_DEC=dec1 bridge_ask "$multiq" > "$ASK_OUT"
+e3_fb=$(cat "$ASK_OUT")
+[ -z "$e3_fb" ] && [ "$MIRROR_BODY" != "__none__" ] \
+  && printf 'ok   E3 no respondible cae al mirror\n' \
+  || { printf 'FAIL E3 fallback (out=[%s] body=[%s])\n' "$e3_fb" "$MIRROR_BODY"; fails=$((fails+1)); }
+
+# Flag E3 on pero SIN BRIDGE_TOPIC_DEC: no intenta responder (no se cuelga esperando
+# en un topic vacío) -> cae al mirror read-only. (unset porque un `VAR=x funcion`
+# previo filtra la asignación al shell actual: quirk POSIX de los prefijos sobre
+# funciones; por eso BRIDGE_TOPIC_DEC seguía a "dec1" del test anterior.)
+MIRROR_BODY="__none__"; ANSWER_CHOICE="opcB"
+unset BRIDGE_TOPIC_DEC
+BRIDGE_ANSWER_QUESTIONS=1 bridge_ask "$Q_INPUT" > "$ASK_OUT"
+unset BRIDGE_ANSWER_QUESTIONS
+e3_nodec=$(cat "$ASK_OUT")
+[ -z "$e3_nodec" ] && [ "$MIRROR_BODY" != "__none__" ] \
+  && printf 'ok   E3 sin DEC cae al mirror\n' \
+  || { printf 'FAIL E3 sin DEC (out=[%s] body=[%s])\n' "$e3_nodec" "$MIRROR_BODY"; fails=$((fails+1)); }
+rm -f "$ASK_OUT"
+
+# ---- E5: hook Notification (idle/permiso) ----
+# bridge_notify lee el payload por stdin; aquí va por here-string (<<<), NO por
+# pipe: un pipe correría bridge_notify en un subshell y NOTIFY_TITLE no subiría.
+NOTIFY_TITLE="__none__"; NOTIFY_MSG="__none__"
+bridge_publish_notification() { NOTIFY_TITLE="$1"; NOTIFY_MSG="$2"; }
+
+# permission_prompt: avisa siempre (sesión vigilada o no).
+NOTIFY_TITLE="__none__"
+bridge_notify permission_prompt <<<"$(jq -nc --arg s "$TEST_SID" '{session_id:$s,message:"Claude necesita permiso"}')"
+check "E5 permission_prompt avisa" "Claude pide permiso" "$NOTIFY_TITLE"
+check "E5 permission_prompt mensaje" "Claude necesita permiso" "$NOTIFY_MSG"
+
+# idle_prompt en sesión vigilada: SE SUPRIME (de-dup con el reprompt de Stop).
+NOTIFY_TITLE="__none__"
+bridge_notify idle_prompt <<<"$(jq -nc --arg s "$TEST_SID" '{session_id:$s,message:"idle"}')"
+check "E5 idle vigilada se suprime" "__none__" "$NOTIFY_TITLE"
+
+# idle_prompt en sesión NO vigilada: avisa.
+NOTIFY_TITLE="__none__"
+bridge_notify idle_prompt <<<'{"session_id":"no-vigilada","message":"sigo esperando"}'
+check "E5 idle no vigilada avisa" "Claude en espera" "$NOTIFY_TITLE"
+
+# Mensaje vacío: no publica nada.
+NOTIFY_TITLE="__none__"
+bridge_notify idle_prompt <<<'{"session_id":"no-vigilada","message":""}'
+check "E5 sin mensaje no avisa" "__none__" "$NOTIFY_TITLE"
+
+# Tipo desconocido: título genérico.
+NOTIFY_TITLE="__none__"
+bridge_notify otro <<<'{"session_id":"no-vigilada","message":"algo"}'
+check "E5 tipo desconocido genérico" "Claude" "$NOTIFY_TITLE"
+
 echo "---"
 if [ "$fails" -eq 0 ]; then echo "todos los tests OK"; else echo "$fails test(s) fallidos"; exit 1; fi
