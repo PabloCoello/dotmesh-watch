@@ -187,6 +187,12 @@ REPROMPT_TEXT="lo que sea"   # sesión no vigilada -> no molesta
 out_off=$(bridge_reprompt <<<"$UNWATCHED_IN")
 [ -z "$out_off" ] && printf 'ok   reprompt no vigilada→no molesta\n' || { printf 'FAIL reprompt no vigilada emitió [%s]\n' "$out_off"; fails=$((fails+1)); }
 
+# Regresión B3: el flag global legado (BRIDGE_REPROMPT_FLAG) ya no activa nada.
+legacy=$(mktemp); BRIDGE_REPROMPT_FLAG="$legacy"; REPROMPT_TEXT="lo que sea"
+out_legacy=$(bridge_reprompt <<<"$UNWATCHED_IN")
+[ -z "$out_legacy" ] && printf 'ok   flag global legado es inerte\n' || { printf 'FAIL flag legado activó reprompt [%s]\n' "$out_legacy"; fails=$((fails+1)); }
+rm -f "$legacy"
+
 # ---- Toggle por sesión (B2) ----
 check "watch_parse /watch on"  on     "$(bridge_watch_parse '/watch on')"
 check "watch_parse watch off"  off    "$(bridge_watch_parse 'watch off')"

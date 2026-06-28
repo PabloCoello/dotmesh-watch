@@ -10,10 +10,9 @@
 : "${BRIDGE_NTFY_BASE:=https://ntfy.sh}"
 : "${BRIDGE_TIMEOUT:=300}"
 
-# Reprompt al terminar (hook Stop). Opt-in por flag: el hook Stop se dispara en
-# CADA turno, así que sin el flag bloquearía siempre. Actívalo con `reprompt.sh on`.
+# Reprompt al terminar (hook Stop): cuántos segundos espera tu reprompt. El opt-in
+# del Stop es por sesión (vigilada), igual que el reenvío de permisos (ver abajo).
 : "${BRIDGE_REPROMPT_TIMEOUT:=300}"
-: "${BRIDGE_REPROMPT_FLAG:=${XDG_CACHE_HOME:-$HOME/.cache}/dotmesh-bridge/reprompt-on}"
 
 # Reenvío por sesión (opt-in). Solo las sesiones marcadas (su flag existe) escalan
 # permisos y disparan el reprompt; las demás pasan de largo. Lo gestionan watch.sh
@@ -346,9 +345,9 @@ bridge_emit_continue() {
   jq -nc --arg r "$1" '{decision: "block", reason: $r}'
 }
 
-# Núcleo del hook Stop: si el modo reprompt está activo (flag), avisa con el
-# resumen y espera un reprompt; si llega, hace continuar a Claude. Si no, calla
-# (deja parar). Lee la entrada del hook Stop por stdin.
+# Núcleo del hook Stop: si la sesión está vigilada, avisa con el resumen y espera
+# un reprompt; si llega, hace continuar a Claude. Si no, calla (deja parar). Lee
+# la entrada del hook Stop por stdin.
 bridge_reprompt() {
   local input session_id summary text start
   input=$(cat)
