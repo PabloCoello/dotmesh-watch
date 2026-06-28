@@ -89,16 +89,36 @@ bridge_actions() {
     "$url" "$id" "$auth" "$url" "$id" "$auth"
 }
 
-# Publica el push de petición. $1=id $2=título $3=cuerpo
+# Etiqueta legible de la sesión, para X-Title del push y para el cuerpo. Sin 0x1f
+# ni saltos. $1=cwd $2=session_id
+bridge_session_label() {
+  local cwd="$1" sid="$2" base short label
+  if [ -n "$cwd" ]; then base=$(basename -- "$cwd"); else base="claude"; fi
+  [ -n "$base" ] || base="claude"
+  short=$(printf '%s' "$sid" | cut -c1-8)
+  if [ -n "$short" ]; then label="$base ($short)"; else label="$base"; fi
+  printf '%s' "$label" | tr -d '\037\n'
+}
+
+# Cuerpo machine-splittable del push: id␟label␟tool␟summary separados por US
+# (0x1f). El reloj lo parte; el summary ya viene sin saltos (bridge_summary).
+# $1=id $2=label $3=tool $4=summary
+bridge_request_body() {
+  local us; us=$(printf '\037')
+  printf '%s%s%s%s%s%s%s' "$1" "$us" "$2" "$us" "$3" "$us" "$4"
+}
+
+# Publica el push de petición. Cuerpo machine-splittable para el reloj; X-Title
+# legible para el móvil. $1=id $2=label $3=tool $4=summary
 bridge_publish() {
-  local id="$1" title="$2" body="$3"
+  local id="$1" label="$2" tool="$3" summary="$4"
   curl -fsS \
     ${BRIDGE_TOKEN:+-H "Authorization: Bearer $BRIDGE_TOKEN"} \
-    -H "Title: $title" \
+    -H "X-Title: $label" \
     -H "Tags: warning" \
     -H "X-Request-Id: $id" \
     -H "Actions: $(bridge_actions "$id")" \
-    -d "$body" \
+    --data-binary "$(bridge_request_body "$id" "$label" "$tool" "$summary")" \
     "$BRIDGE_NTFY_BASE/$BRIDGE_TOPIC_REQ" >/dev/null
 }
 
@@ -153,7 +173,7 @@ bridge_fallback_decision() {
 
 # Núcleo: lee la entrada de PreToolUse por stdin, decide vía ntfy y emite el JSON.
 bridge_decide() {
-  local input tool summary id start decision mode
+  local input tool summary id start decision mode cwd session_id label
   input=$(cat)
   tool=$(jq -r '.tool_name // "?"' <<<"$input")
   mode=$(jq -r '.permission_mode // ""' <<<"$input")
@@ -161,12 +181,15 @@ bridge_decide() {
   # bloqueo). En bypass, eso significa que se ejecuta como siempre.
   bridge_is_dangerous "$tool" "$input" || return 0
   summary=$(bridge_summary "$tool" "$input")
+  cwd=$(jq -r '.cwd // ""' <<<"$input")
+  session_id=$(jq -r '.session_id // ""' <<<"$input")
+  label=$(bridge_session_label "$cwd" "$session_id")
   id=$(bridge_id)
   start=$(date +%s)
   # Diagnóstico/E2E: el id viaja en el push (X-Request-Id) y hace falta para
   # responder. Lo trazamos por stderr (no afecta a la decisión del hook).
   bridge_log "id=$id tool=$tool → responde \"$id allow|deny\" en ${BRIDGE_TOPIC_DEC:-?}"
-  bridge_publish "$id" "Claude: aprobar $tool" "$summary"
+  bridge_publish "$id" "$label" "$tool" "$summary"
   decision=$(bridge_wait_decision "$id" "$start" || true)
   case "$decision" in
     allow) bridge_emit allow "" ;;

@@ -7,9 +7,11 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$DIR/lib.sh"
 
 # --- Dobles de prueba: anulan el transporte real tras el source ---
+US=$(printf '\037')
 FAKE_DECISION=""
 PUBLISHED_BODY=""
-bridge_publish()       { PUBLISHED_BODY="$3"; }          # captura el cuerpo del push
+# Captura el cuerpo REAL (machine-splittable) que publicaría el host.
+bridge_publish()       { PUBLISHED_BODY="$(bridge_request_body "$1" "$2" "$3" "$4")"; }
 bridge_wait_decision() { printf '%s' "$FAKE_DECISION"; } # decisión inyectada
 
 fails=0
@@ -69,15 +71,26 @@ FAKE_DECISION=allow
 bridge_decide >/dev/null <<<'{"tool_name":"Write","tool_input":{"file_path":"/secreto.txt","content":"CLAVE-SUPERSECRETA"}}'
 case "$PUBLISHED_BODY" in
   *CLAVE-SUPERSECRETA*) printf 'FAIL el push filtró contenido del fichero\n'; fails=$((fails+1)) ;;
-  /secreto.txt)         printf 'ok   Write solo publica la ruta\n' ;;
-  *)                    printf 'FAIL resumen Write inesperado [%s]\n' "$PUBLISHED_BODY"; fails=$((fails+1)) ;;
 esac
+check "Write solo publica la ruta" "/secreto.txt" "${PUBLISHED_BODY##*$US}"
 
-# El resumen de Bash recorta a 200 caracteres (comando peligroso para que publique).
+# El resumen de Bash recorta a 200 caracteres (el summary es el último campo).
 FAKE_DECISION=allow
 long="sudo $(printf 'a%.0s' {1..400})"
 bridge_decide >/dev/null <<<"{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"$long\"}}"
-[ "${#PUBLISHED_BODY}" -le 200 ] && printf 'ok   Bash recorta a ≤200\n' || { printf 'FAIL Bash no recorta (%s)\n' "${#PUBLISHED_BODY}"; fails=$((fails+1)); }
+sumf="${PUBLISHED_BODY##*$US}"
+[ "${#sumf}" -le 200 ] && printf 'ok   Bash recorta a ≤200\n' || { printf 'FAIL Bash no recorta (%s)\n' "${#sumf}"; fails=$((fails+1)); }
+
+# Cuerpo machine-splittable (D1): id␟label␟tool␟summary y etiqueta de sesión.
+body=$(bridge_request_body ID123 "miproj (deadbeef)" Write /secreto.txt)
+check "request_body id primero" ID123 "${body%%$US*}"
+nseps=$(printf '%s' "$body" | tr -cd "$US" | wc -c | tr -d ' ')
+check "request_body 3 separadores" 3 "$nseps"
+case "$body" in *"$US"*) printf 'ok   request_body lleva separador US\n' ;; *) printf 'FAIL request_body sin separador\n'; fails=$((fails+1)) ;; esac
+b2=$(bridge_request_body X Y Bash 'rm -rf build')
+case "$b2" in *CLAVE*) printf 'FAIL request_body filtró contenido\n'; fails=$((fails+1)) ;; *) printf 'ok   request_body sin fuga\n' ;; esac
+check "session_label base+sid" "proj (1234abcd)" "$(bridge_session_label /home/p/proj 1234abcd5678)"
+check "session_label sin cwd"  "claude"          "$(bridge_session_label '' '')"
 
 # Matching de decisiones: correlacionado por id y pelado; basura no casa.
 check "match <id> allow" allow "$(bridge_match abc 'abc allow')"
