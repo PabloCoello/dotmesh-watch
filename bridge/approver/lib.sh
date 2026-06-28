@@ -95,6 +95,59 @@ bridge_is_watched() {
   [ -e "$(bridge_forward_flag "$sid")" ]
 }
 
+# ¿El prompt es el comando de toggle? Imprime on|off|status y devuelve 0 si casa
+# ("/watch [on|off|status]" o sin barra; sin argumento = status); si no, return 1.
+bridge_watch_parse() {
+  local p="$1" arg
+  if [[ "$p" =~ ^[[:space:]]*/?watch([[:space:]]+(on|off|status))?[[:space:]]*$ ]]; then
+    arg="${BASH_REMATCH[2]}"
+    printf '%s' "${arg:-status}"
+    return 0
+  fi
+  return 1
+}
+
+# Activa/desactiva/consulta la vigilancia de una sesión. $1=on|off|status $2=sid.
+# Imprime el estado resultante (on|off); devuelve 2 si falta el sid.
+bridge_watch_set() {
+  local action="$1" sid="$2" flag
+  [ -n "$sid" ] || return 2
+  flag=$(bridge_forward_flag "$sid")
+  case "$action" in
+    on)  mkdir -p "$BRIDGE_FORWARD_DIR"; : > "$flag"; printf 'on' ;;
+    off) rm -f "$flag"; printf 'off' ;;
+    *)   bridge_is_watched "$sid" && printf 'on' || printf 'off' ;;
+  esac
+}
+
+# Registra el session_id activo (global y por cwd) para que watch.sh pueda
+# togglear desde el terminal sin conocerlo. $1=sid $2=cwd
+bridge_record_session() {
+  local sid="$1" cwd="$2" h
+  [ -n "$sid" ] || return 0
+  mkdir -p "$BRIDGE_FORWARD_DIR"
+  printf '%s' "$sid" > "$BRIDGE_FORWARD_DIR/last-session"
+  [ -n "$cwd" ] || return 0
+  h=$(printf '%s' "$cwd" | cksum | cut -d' ' -f1)
+  printf '%s' "$sid" > "$BRIDGE_FORWARD_DIR/last-session-$h"
+}
+
+# session_id más reciente registrado: por cwd si se pasa, si no el global. $1=cwd
+bridge_last_session() {
+  local cwd="$1" h f="$BRIDGE_FORWARD_DIR/last-session"
+  if [ -n "$cwd" ]; then
+    h=$(printf '%s' "$cwd" | cksum | cut -d' ' -f1)
+    [ -f "$BRIDGE_FORWARD_DIR/last-session-$h" ] && f="$BRIDGE_FORWARD_DIR/last-session-$h"
+  fi
+  [ -f "$f" ] && cat "$f" || true
+}
+
+# Emite el JSON de UserPromptSubmit que descarta el prompt y muestra un motivo,
+# para que "/watch ..." no consuma un turno. $1=motivo
+bridge_emit_block() {
+  jq -nc --arg r "$1" '{decision: "block", reason: $r}'
+}
+
 # Cabecera Actions de ntfy: dos botones que publican la decisión correlacionada
 # en el topic DEC (aprobar/denegar de un toque desde la notificación). $1=id
 bridge_actions() {

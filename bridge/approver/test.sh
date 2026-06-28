@@ -187,5 +187,29 @@ REPROMPT_TEXT="lo que sea"   # sesión no vigilada -> no molesta
 out_off=$(bridge_reprompt <<<"$UNWATCHED_IN")
 [ -z "$out_off" ] && printf 'ok   reprompt no vigilada→no molesta\n' || { printf 'FAIL reprompt no vigilada emitió [%s]\n' "$out_off"; fails=$((fails+1)); }
 
+# ---- Toggle por sesión (B2) ----
+check "watch_parse /watch on"  on     "$(bridge_watch_parse '/watch on')"
+check "watch_parse watch off"  off    "$(bridge_watch_parse 'watch off')"
+check "watch_parse /watch"     status "$(bridge_watch_parse '/watch')"
+check "watch_parse watch"      status "$(bridge_watch_parse 'watch')"
+check "watch_parse status"     status "$(bridge_watch_parse '/watch status')"
+bridge_watch_parse 'arregla el watch' && { printf 'FAIL watch_parse casó frase libre\n'; fails=$((fails+1)); } || printf 'ok   watch_parse ignora frase libre\n'
+bridge_watch_parse 'watcher on'       && { printf 'FAIL watch_parse casó watcher\n'; fails=$((fails+1)); } || printf 'ok   watch_parse ignora watcher\n'
+
+SID2=sesion-b2
+check "watch_set on"        on  "$(bridge_watch_set on "$SID2")"
+check "is_watched tras on"  si  "$(bridge_is_watched "$SID2" && echo si || echo no)"
+check "watch_set status"    on  "$(bridge_watch_set status "$SID2")"
+check "watch_set off"       off "$(bridge_watch_set off "$SID2")"
+check "is_watched tras off" no  "$(bridge_is_watched "$SID2" && echo si || echo no)"
+bridge_watch_set on '' && { printf 'FAIL watch_set aceptó sid vacío\n'; fails=$((fails+1)); } || printf 'ok   watch_set rechaza sid vacío\n'
+
+bridge_record_session sid-xyz /tmp/proj-b2
+check "last_session por cwd" sid-xyz "$(bridge_last_session /tmp/proj-b2)"
+check "last_session global"  sid-xyz "$(bridge_last_session '')"
+
+check "emit_block decision" block  "$(bridge_emit_block 'x'    | jq -r .decision)"
+check "emit_block reason"   'hola' "$(bridge_emit_block 'hola' | jq -r .reason)"
+
 echo "---"
 if [ "$fails" -eq 0 ]; then echo "todos los tests OK"; else echo "$fails test(s) fallidos"; exit 1; fi
