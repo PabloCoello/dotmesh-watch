@@ -217,5 +217,16 @@ check "last_session global"  sid-xyz "$(bridge_last_session '')"
 check "emit_block decision" block  "$(bridge_emit_block 'x'    | jq -r .decision)"
 check "emit_block reason"   'hola' "$(bridge_emit_block 'hola' | jq -r .reason)"
 
+# ---- additionalContext en sesiones vigiladas (B4) ----
+check "emit_context event" UserPromptSubmit "$(bridge_emit_context 'hola' | jq -r '.hookSpecificOutput.hookEventName')"
+check "emit_context texto" 'hola'           "$(bridge_emit_context 'hola' | jq -r '.hookSpecificOutput.additionalContext')"
+
+# Integración del hook: sesión vigilada inyecta contexto; no vigilada, nada.
+WATCH_HOOK="$DIR/userpromptsubmit-watch.sh"
+ctx_w=$(printf '%s' '{"session_id":"test-session","cwd":"/tmp/x","prompt":"haz algo"}' | BRIDGE_FORWARD_DIR="$BRIDGE_FORWARD_DIR" bash "$WATCH_HOOK" | jq -r '.hookSpecificOutput.additionalContext // ""')
+[ -n "$ctx_w" ] && printf 'ok   sesión vigilada inyecta contexto\n' || { printf 'FAIL vigilada sin contexto\n'; fails=$((fails+1)); }
+ctx_u=$(printf '%s' '{"session_id":"no-vigilada","cwd":"/tmp/x","prompt":"haz algo"}' | BRIDGE_FORWARD_DIR="$BRIDGE_FORWARD_DIR" bash "$WATCH_HOOK")
+[ -z "$ctx_u" ] && printf 'ok   sesión no vigilada no inyecta\n' || { printf 'FAIL no vigilada inyectó [%s]\n' "$ctx_u"; fails=$((fails+1)); }
+
 echo "---"
 if [ "$fails" -eq 0 ]; then echo "todos los tests OK"; else echo "$fails test(s) fallidos"; exit 1; fi

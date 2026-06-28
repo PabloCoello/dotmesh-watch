@@ -19,6 +19,11 @@
 # y el hook UserPromptSubmit.
 : "${BRIDGE_FORWARD_DIR:=${XDG_CACHE_HOME:-$HOME/.cache}/dotmesh-bridge}"
 
+# Contexto inyectado en sesiones vigiladas (hook UserPromptSubmit): pide cerrar el
+# turno final con la centinela del skill watch-summary, para que el resumen quepa
+# en el reloj. Override en .env si quieres afinar el texto.
+: "${BRIDGE_WATCH_CONTEXT:=Esta sesión se refleja en el reloj (bridge dotmesh-watch). Termina SIEMPRE el turno final con una única línea, la última del mensaje, con el formato exacto: WATCH: <ESTADO> <asunto> · <siguiente-acción>. ESTADO es uno de OK/FALLO/BLOQUEADO/ESPERA, en castellano, sin markdown, <=160 caracteres; mapea la siguiente-acción a Continúa/Tests/Commit cuando encaje. Detalle en la skill watch-summary.}"
+
 # Comandos Bash que SÍ escalan a la muñeca (regex extendida). Lo demás pasa de
 # largo sin push: en bypass se ejecuta como siempre. Override/extiende en .env.
 : "${BRIDGE_DANGER_REGEX:=rm +-[a-zA-Z]*[rf]|--force|--hard|git +clean +-[a-zA-Z]*f|git +branch +-D|sudo +|dd +if=|mkfs|chmod +-R|chown +-R|(curl|wget) +[^|]*\| *(sh|bash)|npm +publish|shutdown|reboot|poweroff|kubectl +delete|terraform +(apply|destroy)|docker +(rm|rmi|system +prune)}"
@@ -145,6 +150,12 @@ bridge_last_session() {
 # para que "/watch ..." no consuma un turno. $1=motivo
 bridge_emit_block() {
   jq -nc --arg r "$1" '{decision: "block", reason: $r}'
+}
+
+# Inyecta additionalContext en UserPromptSubmit (texto extra para el modelo, sin
+# bloquear el prompt). $1=texto
+bridge_emit_context() {
+  jq -nc --arg c "$1" '{hookSpecificOutput: {hookEventName: "UserPromptSubmit", additionalContext: $c}}'
 }
 
 # Cabecera Actions de ntfy: dos botones que publican la decisión correlacionada

@@ -21,4 +21,10 @@ bridge_record_session "$session_id" "$cwd"
 if cmd=$(bridge_watch_parse "$prompt"); then
   state=$(bridge_watch_set "$cmd" "$session_id")
   bridge_emit_block "bridge: vigilancia del reloj $state para esta sesión"
+  exit 0
+fi
+
+# Sesión vigilada: recuerda al modelo cerrar el turno con la línea WATCH (reloj).
+if bridge_is_watched "$session_id"; then
+  bridge_emit_context "$BRIDGE_WATCH_CONTEXT"
 fi
