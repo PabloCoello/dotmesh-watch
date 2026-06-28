@@ -373,3 +373,202 @@ bridge_reprompt() {
   [ -n "$text" ] && bridge_emit_continue "$text"
   return 0   # sin reprompt = deja parar limpio (no debe salir con error)
 }
+
+# ---- Preguntas del arnés (hook PreToolUse matcher AskUserQuestion) ----
+#
+# Dos modos sobre el mismo hook (pretooluse-ask.sh):
+#  - E4 (por defecto): refleja la pregunta al reloj como AVISO y NO responde; tú
+#    sigues respondiendo en el terminal (stdout vacío -> la tool procede normal).
+#  - E3 (opt-in extra, BRIDGE_ANSWER_QUESTIONS=1): intenta RESPONDER desde la
+#    muñeca una pregunta única y no-multiSelect; si no es respondible o hay
+#    timeout, cae al mirror read-only. La forma de updatedInput.answers
+#    ({pregunta: label}) se confirmó en el spike E1; habilitar E3 en producción
+#    exige antes el GO del spike E2 (TUI interactiva). Ver SETUP.md.
+
+# Resumen seguro de la(s) pregunta(s) para el push: header + question + labels de
+# las opciones. Son textos del modelo (no contenido de ficheros), pero igual se
+# limpian US/saltos y se recorta. $1=JSON de entrada del hook.
+bridge_question_summary() {
+  # jq -j (sin salto final): así una entrada vacía da "" y no " ", y el fallback
+  # "(pregunta sin texto)" de bridge_mirror_question se activa de verdad.
+  jq -j '
+    [ .tool_input.questions[]?
+      | ((.header // "") as $h | (.question // "") as $q
+         | if $h != "" and $q != "" then $h + ": " + $q
+           elif $q != "" then $q else $h end)
+        + ( [.options[]?.label]
+            | if length > 0 then "  [" + join(" · ") + "]" else "" end )
+    ] | join(" / ")
+  ' <<<"$1" 2>/dev/null | tr '\037\n' '  ' | cut -c1-300
+}
+
+# Refleja la pregunta al reloj como aviso (E4): X-Title fijo, SIN Actions y SIN
+# cuerpo machine-splittable (el parser del reloj ignora líneas sin US -> no
+# ensucia el picker de decisiones). Read-only: no emite stdout. $1=input.
+bridge_mirror_question() {
+  local summary; summary=$(bridge_question_summary "$1")
+  [ -n "$summary" ] || summary="(pregunta sin texto)"
+  curl -fsS \
+    ${BRIDGE_TOKEN:+-H "Authorization: Bearer $BRIDGE_TOKEN"} \
+    -H "X-Title: Claude pregunta" \
+    -H "Tags: speech_balloon" \
+    -d "$summary" \
+    "$BRIDGE_NTFY_BASE/$BRIDGE_TOPIC_REQ" >/dev/null || return 0   # best-effort
+}
+
+# ¿Es una pregunta respondible desde la muñeca (E3 v1)? Solo una pregunta y sin
+# multiSelect; lo demás cae al mirror read-only (E4). $1=input -> 0=sí 1=no.
+bridge_question_answerable() {
+  local ok
+  ok=$(jq -r '
+    (.tool_input.questions // []) as $qs
+    | if ($qs | length) == 1
+         and (($qs[0].multiSelect // false) | not)
+         and (($qs[0].question // null) | type) == "string"
+         and (($qs[0].options // null) | type) == "array"
+         and (($qs[0].options | length) >= 1)
+      then "1" else "0" end
+  ' <<<"$1" 2>/dev/null) || return 1
+  [ "$ok" = 1 ]
+}
+
+# Cuerpo del push de una pregunta respondible: enunciado, opciones numeradas y la
+# instrucción de respuesta correlacionada. $1=id $2=input.
+bridge_question_prompt() {
+  jq -r --arg id "$1" '
+    .tool_input.questions[0] as $q
+    | ( ($q.header // "") as $h
+        | (if $h != "" then $h + " — " else "" end) + ($q.question // "") ),
+      ( [ $q.options | to_entries[] | "  \(.key + 1)) \(.value.label)" ] | .[] ),
+      ( "Responde: \"" + $id + " <n>\"" )
+  ' <<<"$2" 2>/dev/null
+}
+
+# Publica la pregunta respondible al reloj (E3). X-Request-Id para correlacionar;
+# SIN Actions (la respuesta llega por texto en DEC: "<id> <n|label>"). Los botones
+# del reloj para opciones llegan con la app CIQ (M4). $1=id $2=label $3=input.
+bridge_publish_question() {
+  local id="$1" label="$2" input="$3"
+  curl -fsS \
+    ${BRIDGE_TOKEN:+-H "Authorization: Bearer $BRIDGE_TOKEN"} \
+    -H "X-Title: $label — Claude pregunta" \
+    -H "Tags: speech_balloon" \
+    -H "X-Request-Id: $id" \
+    -d "$(bridge_question_prompt "$id" "$input" | tr -d '\037')" \
+    "$BRIDGE_NTFY_BASE/$BRIDGE_TOPIC_REQ" >/dev/null || return 0   # best-effort
+}
+
+# Mapea un mensaje del topic DEC a la label elegida. Acepta "<id> <n>" (índice
+# 1-based) o "<id> <label>" (case-insensitive). $1=id $2=mensaje $3=input ->
+# imprime la label o vacío.
+bridge_match_answer() {
+  local id="$1" msg="$2" input="$3" rest
+  case "$msg" in
+    "$id "*) rest=${msg#"$id" } ;;
+    *) return 0 ;;
+  esac
+  # Índice 1-based: exige [1-9][0-9]* para descartar "0" (que en jq sería
+  # options[-1] = la última opción) y los ceros a la izquierda (que --argjson
+  # rechazaría). Un "0" cae a la rama de label y, al no casar, devuelve vacío.
+  if printf '%s' "$rest" | grep -qE '^[1-9][0-9]*$'; then
+    jq -r --argjson k "$rest" '.tool_input.questions[0].options[$k - 1].label // ""' <<<"$input" 2>/dev/null
+    return 0
+  fi
+  jq -r --arg a "$rest" '
+    [ .tool_input.questions[0].options[]?.label
+      | select((ascii_downcase) == ($a | ascii_downcase)) ] | first // ""
+  ' <<<"$input" 2>/dev/null
+}
+
+# Espera la respuesta correlacionada del id en DEC. Imprime la label elegida;
+# vacío si timeout. $1=id $2=since (unix ts) $3=input.
+bridge_wait_answer() {
+  local id="$1" since="${2:-all}" input="$3" line ev msg label
+  curl -fsS --no-buffer --max-time "$BRIDGE_TIMEOUT" \
+    ${BRIDGE_TOKEN:+-H "Authorization: Bearer $BRIDGE_TOKEN"} \
+    "$BRIDGE_NTFY_BASE/$BRIDGE_TOPIC_DEC/json?since=$since" 2>/dev/null | \
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    ev=$(jq -r '.event // empty' <<<"$line" 2>/dev/null) || continue
+    [ "$ev" = "message" ] || continue
+    msg=$(jq -r '.message // empty' <<<"$line" 2>/dev/null)
+    label=$(bridge_match_answer "$id" "$msg" "$input")
+    [ -n "$label" ] && { printf '%s' "$label"; break; }
+  done
+}
+
+# Construye el updatedInput de la respuesta: tool_input + answers como mapa
+# {pregunta: label} (forma confirmada en E1). $1=input $2=label elegida.
+bridge_answer_input() {
+  jq -c --arg a "$2" '.tool_input + { answers: { (.tool_input.questions[0].question): $a } }' <<<"$1" 2>/dev/null
+}
+
+# Emite el JSON de PreToolUse que responde la pregunta (allow + updatedInput).
+# $1=updatedInput (JSON).
+bridge_emit_answer() {
+  jq -nc --argjson ui "$1" '
+    {hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "allow", updatedInput: $ui}}
+  '
+}
+
+# Núcleo del hook AskUserQuestion. Opt-in por sesión. Con BRIDGE_ANSWER_QUESTIONS=1
+# y DEC configurado y pregunta respondible: publica, espera y responde (E3);
+# si no, refleja read-only (E4). $1=JSON de entrada del hook.
+bridge_ask() {
+  local input="$1" session_id cwd label id start choice ui
+  session_id=$(jq -r '.session_id // ""' <<<"$input")
+  bridge_is_watched "$session_id" || return 0   # opt-in por sesión
+  if [ "${BRIDGE_ANSWER_QUESTIONS:-0}" = 1 ] && [ -n "${BRIDGE_TOPIC_DEC:-}" ] \
+     && bridge_question_answerable "$input"; then
+    cwd=$(jq -r '.cwd // ""' <<<"$input")
+    label=$(bridge_session_label "$cwd" "$session_id")
+    id=$(bridge_id)
+    start=$(date +%s)
+    bridge_log "pregunta id=$id → responde \"$id <n>\" en ${BRIDGE_TOPIC_DEC:-?}"
+    bridge_publish_question "$id" "$label" "$input"
+    choice=$(bridge_wait_answer "$id" "$start" "$input" || true)
+    if [ -n "$choice" ]; then
+      ui=$(bridge_answer_input "$input" "$choice")
+      bridge_emit_answer "$ui"
+    fi
+    return 0   # timeout/sin elección -> sin stdout: la pregunta sigue en el terminal
+  fi
+  bridge_mirror_question "$input"   # E4: aviso read-only
+  return 0
+}
+
+# ---- Avisos del arnés (hook Notification) ----
+
+# Publica un aviso simple al reloj (E5): .message del payload, X-Title según el
+# tipo, SIN Actions (Notification es solo efecto, no puede responder).
+# $1=título $2=mensaje.
+bridge_publish_notification() {
+  local title="$1" message="$2"
+  [ -n "$message" ] || return 0
+  curl -fsS \
+    ${BRIDGE_TOKEN:+-H "Authorization: Bearer $BRIDGE_TOKEN"} \
+    -H "X-Title: $title" \
+    -H "Tags: bell" \
+    -d "$message" \
+    "$BRIDGE_NTFY_BASE/$BRIDGE_TOPIC_REQ" >/dev/null || return 0   # best-effort
+}
+
+# Núcleo del hook Notification. $1=kind (idle_prompt|permission_prompt|otro). Lee
+# el payload por stdin. de-dup: idle_prompt se SUPRIME en sesiones vigiladas
+# (el push del reprompt del hook Stop ya cubre ese caso); permission_prompt
+# siempre avisa (es un bloqueo de permiso, conviene saberlo).
+bridge_notify() {
+  local kind="${1:-}" input session_id message title
+  input=$(cat)
+  message=$(jq -r '.message // ""' <<<"$input" 2>/dev/null)
+  [ -n "$message" ] || return 0
+  session_id=$(jq -r '.session_id // ""' <<<"$input" 2>/dev/null)
+  case "$kind" in
+    idle_prompt)
+      bridge_is_watched "$session_id" && return 0   # de-dup con el reprompt de Stop
+      title="Claude en espera" ;;
+    permission_prompt) title="Claude pide permiso" ;;
+    *)                 title="Claude" ;;
+  esac
+  bridge_publish_notification "$title" "$message"
+}

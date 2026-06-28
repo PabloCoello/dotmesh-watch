@@ -19,10 +19,12 @@ Claude (tool-use) ──PreToolUse hook (host)──┐ publica petición + resu
 
 - **Transporte: ntfy ida y vuelta.** El host publica la petición en un topic y
   espera la decisión en otro. Sin puertos abiertos; funciona desde cualquier red.
-- **Dos hooks, un transporte:**
-  - `PreToolUse` → aprobar/denegar herramientas peligrosas desde la muñeca.
-  - `Stop` → avisar al terminar con el resumen y aceptar un reprompt desde la
-    muñeca.
+- **Varios hooks, un transporte:**
+  - `PreToolUse` (Bash/Write/Edit) → aprobar/denegar herramientas peligrosas.
+  - `PreToolUse` (AskUserQuestion) → reflejar las preguntas del arnés al reloj y,
+    opcionalmente, responderlas desde la muñeca (ver `SETUP.md`).
+  - `Stop` → avisar al terminar con el resumen y aceptar un reprompt.
+  - `Notification` → reflejar avisos de inactividad/permiso (solo aviso, no responde).
 - **Opt-in por sesión:** solo las conversaciones que marques con `/watch on` (hook
   `UserPromptSubmit`) reenvían al reloj; el resto no molesta. Ver `SETUP.md`.
 - **Funciona en bypass.** Los hooks se ejecutan aunque trabajes con permisos en
@@ -44,8 +46,12 @@ bridge/
 ├── approver/                  # lado host (este repo)
 │   ├── lib.sh                 # transporte ntfy + emisión del JSON del hook
 │   ├── pretooluse-approve.sh  # hook PreToolUse (aprobar/denegar)
+│   ├── pretooluse-ask.sh      # hook PreToolUse AskUserQuestion (reflejar/responder)
 │   ├── stop-reprompt.sh       # hook Stop (aviso + reprompt al terminar)
-│   ├── reprompt.sh            # toggle del modo reprompt (on/off/status)
+│   ├── notification-notify.sh # hook Notification (avisos idle/permiso)
+│   ├── userpromptsubmit-watch.sh # hook UserPromptSubmit (/watch + contexto)
+│   ├── watch.sh               # toggle de vigilancia por sesión (respaldo de terminal)
+│   ├── reprompt.sh            # envoltorio en desuso (delega en watch.sh)
 │   ├── test.sh                # test local sin red
 │   └── .env.example           # config (copia a .env, fuera de git)
 ├── watchapp/                  # approver nativo Connect IQ (camino principal del reloj)
