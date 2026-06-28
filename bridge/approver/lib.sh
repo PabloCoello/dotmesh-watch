@@ -183,25 +183,35 @@ bridge_decide() {
 
 # ---- Reprompt al terminar una tarea (hook Stop) ----
 
-# Resumen final (último mensaje de texto del asistente). El stdin de Stop ya lo
-# trae en .last_assistant_message; si falta (versión antigua), cae al parseo del
-# transcript. $1 = JSON de entrada del hook Stop.
+# Resumen final para el push. El stdin de Stop trae el último mensaje del
+# asistente en .last_assistant_message; si falta (versión antigua), cae al parseo
+# del transcript. Si ese mensaje acaba con la centinela del skill watch-summary
+# (línea "WATCH: ..."), se prefiere esa línea, sin el tag y capada a 200, para que
+# el usuario nunca vea "WATCH:". Si no hay centinela, devuelve el texto completo
+# (lo recorta el caller). $1 = JSON de entrada del hook Stop.
 bridge_last_assistant() {
-  local input="$1" msg transcript
-  msg=$(jq -r '.last_assistant_message // ""' <<<"$input" 2>/dev/null) || true
-  if [ -n "$msg" ]; then
-    printf '%s' "$msg"
-    return 0
+  local input="$1" raw transcript watch
+  raw=$(jq -r '.last_assistant_message // ""' <<<"$input" 2>/dev/null) || true
+  if [ -z "$raw" ]; then
+    transcript=$(jq -r '.transcript_path // ""' <<<"$input" 2>/dev/null) || true
+    if [ -f "$transcript" ]; then
+      raw=$(jq -rs '
+        [ .[] | select(.type=="assistant")
+          | (if (.message.content|type)=="array"
+             then ([.message.content[]?|select(.type=="text")|.text]|join("\n"))
+             else (.message.content // "") end) ]
+        | map(select(. != "")) | last // ""
+      ' "$transcript" 2>/dev/null) || true
+    fi
   fi
-  transcript=$(jq -r '.transcript_path // ""' <<<"$input" 2>/dev/null) || true
-  [ -f "$transcript" ] || return 0
-  jq -rs '
-    [ .[] | select(.type=="assistant")
-      | (if (.message.content|type)=="array"
-         then ([.message.content[]?|select(.type=="text")|.text]|join("\n"))
-         else (.message.content // "") end) ]
-    | map(select(. != "")) | last // ""
-  ' "$transcript" 2>/dev/null || true
+  watch=$(printf '%s\n' "$raw" | grep -E '^[[:space:]]*WATCH:' | tail -n1 || true)
+  if [ -n "$watch" ]; then
+    watch=${watch#*WATCH:}
+    watch=${watch# }
+    printf '%s' "$watch" | cut -c1-200
+  else
+    printf '%s' "$raw"
+  fi
 }
 
 # Botones de reprompt predefinido (publican texto en el topic REPROMPT). Máx. 3.

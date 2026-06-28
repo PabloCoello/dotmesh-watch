@@ -125,6 +125,21 @@ printf '%s\n' \
 check "last assistant fallback" "resumen final" "$(bridge_last_assistant "$(jq -nc --arg t "$tf" '{transcript_path:$t}')")"
 rm -f "$tf"
 
+# Centinela WATCH: del skill watch-summary — se prefiere, sin el tag y capada a 200.
+check "watch centinela" "OK lib.sh · Tests" \
+  "$(bridge_last_assistant '{"last_assistant_message":"respuesta larga normal\nWATCH: OK lib.sh · Tests"}')"
+case "$(bridge_last_assistant '{"last_assistant_message":"x\nWATCH: OK y"}')" in
+  *WATCH:*) printf 'FAIL centinela filtró el tag WATCH:\n'; fails=$((fails+1)) ;;
+  *)        printf 'ok   centinela sin tag WATCH:\n' ;;
+esac
+check "sin centinela→texto" "respuesta sin marca" \
+  "$(bridge_last_assistant '{"last_assistant_message":"respuesta sin marca"}')"
+longw="WATCH: $(printf 'b%.0s' {1..400})"
+out_w=$(bridge_last_assistant "$(jq -nc --arg m "$longw" '{last_assistant_message:$m}')")
+[ "${#out_w}" -le 200 ] && printf 'ok   centinela capa a <=200\n' || { printf 'FAIL centinela no capa (%s)\n' "${#out_w}"; fails=$((fails+1)); }
+check "centinela última gana" "segunda" \
+  "$(bridge_last_assistant '{"last_assistant_message":"WATCH: primera\nWATCH: segunda"}')"
+
 # bridge_reprompt con transporte simulado.
 bridge_publish_reprompt() { :; }
 REPROMPT_TEXT=""
