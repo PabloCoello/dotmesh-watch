@@ -175,7 +175,7 @@ bridge_session_label() {
   [ -n "$base" ] || base="claude"
   short=$(printf '%s' "$sid" | cut -c1-8)
   if [ -n "$short" ]; then label="$base ($short)"; else label="$base"; fi
-  printf '%s' "$label" | tr -d '\037\n'
+  printf '%s' "$label" | tr -d '\037\r\n'
 }
 
 # Cuerpo machine-splittable del push: id␟label␟tool␟summary separados por US
@@ -571,4 +571,46 @@ bridge_notify() {
     *)                 title="Claude" ;;
   esac
   bridge_publish_notification "$title" "$message"
+}
+
+# ---- Fallo por error de API (hook StopFailure) ----
+#
+# StopFailure se dispara cuando el turno termina por un error de API (rate_limit,
+# overloaded, server_error, ...); el hook Stop NO dispara en ese caso, ni en la
+# interrupción manual (Esc). Es SOLO efecto: el arnés ignora su stdout y su código
+# de salida -> un único push, sin Actions, sin espera y sin decisión. Avisa SIEMPRE
+# que haya transporte (un fallo conviene saberlo), pero respeta el opt-in para los
+# metadatos: el nombre del proyecto solo viaja en sesiones vigiladas; las demás
+# reciben un aviso genérico.
+
+# Publica el aviso de fallo. Tag rotating_light para distinguirlo del resto.
+# $1=título $2=mensaje.
+bridge_publish_failure() {
+  local title="$1" message="$2"
+  curl -fsS \
+    ${BRIDGE_TOKEN:+-H "Authorization: Bearer $BRIDGE_TOKEN"} \
+    -H "X-Title: $title" \
+    -H "Tags: rotating_light" \
+    -d "$message" \
+    "$BRIDGE_NTFY_BASE/$BRIDGE_TOPIC_REQ" >/dev/null || return 0   # best-effort
+}
+
+# Núcleo del hook StopFailure. Lee el payload por stdin. En sesión vigilada el
+# cuerpo identifica QUÉ proyecto murió (etiqueta = basename del cwd + sid corto);
+# en las no vigiladas va un aviso genérico (el opt-in controla los metadatos). Nunca
+# se incluye el transcript_path ni su contenido (no-fuga). El `|| true` evita que un
+# payload con JSON roto aborte el aviso bajo `set -euo pipefail`: degrada a genérico.
+bridge_failure() {
+  local input cwd session_id label message
+  input=$(cat)
+  cwd=$(jq -r '.cwd // ""' <<<"$input" 2>/dev/null || true)
+  session_id=$(jq -r '.session_id // ""' <<<"$input" 2>/dev/null || true)
+  if bridge_is_watched "$session_id"; then
+    label=$(bridge_session_label "$cwd" "$session_id")
+    message="La sesión $label terminó por un error de API."
+  else
+    message="Una sesión de Claude terminó por un error de API."
+  fi
+  bridge_log "stopfailure: aviso de fallo de API en sesión ${session_id:-?}"
+  bridge_publish_failure "Claude falló (error de API)" "$message"
 }

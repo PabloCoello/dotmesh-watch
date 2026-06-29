@@ -379,5 +379,48 @@ NOTIFY_TITLE="__none__"
 bridge_notify otro <<<'{"session_id":"no-vigilada","message":"algo"}'
 check "E5 tipo desconocido genérico" "Claude" "$NOTIFY_TITLE"
 
+# ---- A4: hook StopFailure (aviso de muerte por error de API) ----
+# bridge_failure lee el payload por stdin (here-string, no pipe: un pipe correría
+# la función en un subshell y FAIL_* no subirían).
+FAIL_TITLE="__none__"; FAIL_MSG="__none__"
+bridge_publish_failure() { FAIL_TITLE="$1"; FAIL_MSG="$2"; }
+
+# Avisa SIEMPRE que haya transporte, vigilada o no: el título no cambia.
+FAIL_TITLE="__none__"
+bridge_failure <<<'{"session_id":"no-vigilada","cwd":"/home/p/proj"}'
+check "A4 avisa siempre (no vigilada)" "Claude falló (error de API)" "$FAIL_TITLE"
+
+# Sesión NO vigilada: aviso genérico, SIN el nombre del proyecto (respeta el opt-in).
+FAIL_MSG="__none__"
+bridge_failure <<<'{"session_id":"no-vigilada","cwd":"/home/p/proj"}'
+case "$FAIL_MSG" in
+  *proj*) printf 'FAIL A4 no vigilada filtra el proyecto [%s]\n' "$FAIL_MSG"; fails=$((fails+1)) ;;
+  *) printf 'ok   A4 no vigilada usa aviso genérico\n' ;;
+esac
+
+# Sesión vigilada: el cuerpo SÍ identifica el proyecto (basename del cwd).
+FAIL_TITLE="__none__"; FAIL_MSG="__none__"
+bridge_failure <<<"$(jq -nc --arg s "$TEST_SID" '{session_id:$s,cwd:"/home/p/proj"}')"
+check "A4 vigilada avisa" "Claude falló (error de API)" "$FAIL_TITLE"
+case "$FAIL_MSG" in
+  *proj*) printf 'ok   A4 vigilada identifica el proyecto\n' ;;
+  *) printf 'FAIL A4 vigilada sin etiqueta [%s]\n' "$FAIL_MSG"; fails=$((fails+1)) ;;
+esac
+
+# No-fuga: el transcript_path (ni su contenido) nunca acaba en el push, ni siquiera
+# en una sesión vigilada.
+FAIL_MSG="__none__"
+bridge_failure <<<"$(jq -nc --arg s "$TEST_SID" '{session_id:$s,cwd:"/home/p/proj",transcript_path:"/home/p/.claude/CLAVE-SUPERSECRETA.jsonl"}')"
+case "$FAIL_MSG" in
+  *CLAVE-SUPERSECRETA*) printf 'FAIL A4 filtra el transcript_path\n'; fails=$((fails+1)) ;;
+  *) printf 'ok   A4 no filtra el transcript_path\n' ;;
+esac
+
+# JSON malformado: degrada a aviso genérico en vez de abortar (StopFailure es la red
+# de seguridad; debe publicar igual).
+FAIL_TITLE="__none__"
+bridge_failure <<<'esto no es json'
+check "A4 JSON roto avisa igual" "Claude falló (error de API)" "$FAIL_TITLE"
+
 echo "---"
 if [ "$fails" -eq 0 ]; then echo "todos los tests OK"; else echo "$fails test(s) fallidos"; exit 1; fi

@@ -25,6 +25,8 @@ Claude (tool-use) ──PreToolUse hook (host)──┐ publica petición + resu
     opcionalmente, responderlas desde la muñeca (ver `SETUP.md`).
   - `Stop` → avisar al terminar con el resumen y aceptar un reprompt.
   - `Notification` → reflejar avisos de inactividad/permiso (solo aviso, no responde).
+  - `StopFailure` → avisar cuando el turno muere por un error de API (siempre que
+    haya transporte; un único push, sin botones ni espera).
 - **Opt-in por sesión:** solo las conversaciones que marques con `/watch on` (hook
   `UserPromptSubmit`) reenvían al reloj; el resto no molesta. Ver `SETUP.md`.
 - **Funciona en bypass.** Los hooks se ejecutan aunque trabajes con permisos en
@@ -49,6 +51,7 @@ bridge/
 │   ├── pretooluse-ask.sh      # hook PreToolUse AskUserQuestion (reflejar/responder)
 │   ├── stop-reprompt.sh       # hook Stop (aviso + reprompt al terminar)
 │   ├── notification-notify.sh # hook Notification (avisos idle/permiso)
+│   ├── stopfailure-notify.sh  # hook StopFailure (aviso de muerte por error de API)
 │   ├── userpromptsubmit-watch.sh # hook UserPromptSubmit (/watch + contexto)
 │   ├── watch.sh               # toggle de vigilancia por sesión (respaldo de terminal)
 │   ├── reprompt.sh            # envoltorio en desuso (delega en watch.sh)

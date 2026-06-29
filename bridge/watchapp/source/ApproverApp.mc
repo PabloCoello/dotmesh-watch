@@ -8,6 +8,13 @@ class ApproverApp extends Application.AppBase {
     }
 
     function getInitialView() {
-        return [ new ApproverMenu(), new ApproverMenuDelegate() ];
+        var menu = new ApproverMenu();
+        return [ menu, new ApproverMenuDelegate(menu) ];
+    }
+
+    // Vista de la tarjeta glance: el último pendiente guardado en Storage.
+    (:glance)
+    function getGlanceView() {
+        return [ new ApproverGlance() ];
     }
 }

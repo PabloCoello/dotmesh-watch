@@ -14,8 +14,10 @@ Claude (tool-use) ──PreToolUse hook (host)──┐ publica en topic REQ (+ 
 ```
 
 - **Botón en la notificación** (móvil): publica `"<id> allow|deny"` en el topic DEC.
-- **Desde el Garmin**: Tasker publica un `allow`/`deny` "pelado" en el topic DEC
-  (vale con una petición pendiente cada vez; ver "Multi-sesión").
+- **Approver nativo** (reloj, recomendado): publica `"<id> allow|deny"` correlacionado
+  en el topic DEC.
+- **Tasker** (legado, Garmin): publica un `allow`/`deny` "pelado" en el topic DEC (vale
+  con una petición pendiente cada vez; ver "Multi-sesión").
 
 ---
 
@@ -88,8 +90,17 @@ Requisitos: `curl` y `jq`.
 
 ## Paso 4 — Garmin (decidir desde la muñeca)
 
-El Garmin no dispara de forma fiable los botones de una notificación, así que la
-acción desde el reloj va por **Tasker** (en el móvil) + un disparador en el reloj.
+La vía recomendada es el **approver nativo** ([`watchapp/`](watchapp/)): una app Connect
+IQ que lee el topic REQ y publica la decisión sin Tasker ni apps de pago. En sus
+*Properties*, **`reqTopic` es tu `BRIDGE_TOPIC_REQ`** (de donde lee lo pendiente) y
+**`decTopic` tu `BRIDGE_TOPIC_DEC`** (donde manda el `"<id> allow|deny"`). Cuidado con no
+confundir `reqTopic` (peticiones) con `repTopic` (reprompt del hook `Stop`, otro topic
+distinto). Su instalación y configuración están en
+[`watchapp/README.md`](watchapp/README.md).
+
+La alternativa **legada** por **Tasker** (móvil) + un disparador en el reloj sigue aquí
+para quien ya la use; el Garmin no dispara de forma fiable los botones de una
+notificación.
 
 1. **Tasker** (Android): crea dos tareas con una sola acción **HTTP Request** cada una:
    - *Aprobar* → `POST` a `https://ntfy.sh/<TOPIC_DEC>` con cuerpo `allow`.
@@ -100,9 +111,22 @@ acción desde el reloj va por **Tasker** (en el móvil) + un disparador en el re
    Tasker. Mapea, p. ej., dos entradas del menú/atajo del reloj a *Aprobar* y
    *Denegar*. (Los menús exactos varían por versión de la app; la idea: entrada del
    reloj → tarea de Tasker → POST al topic DEC.)
-3. **Aviso en la muñeca**: la propia notificación de ntfy ya se refleja en el reloj
-   (vibración + texto). Opcional: una tarea de Tasker que reaccione al broadcast de
-   ntfy (`io.heckel.ntfy.MESSAGE_RECEIVED`) para vibrar de forma distinta.
+
+### Aviso en la muñeca
+
+Para enterarte de que hay algo que decidir hay tres opciones, de menos a más esfuerzo:
+
+1. **Notificación de ntfy reflejada** (recomendado en v2): si el móvil tiene la app ntfy
+   suscrita al topic REQ, su notificación se refleja en el reloj con vibración y texto.
+   No requiere nada en el reloj y funciona con el approver nativo.
+2. **`Attention.vibrate` en primer plano**: el approver puede vibrar al detectar una
+   petición, pero solo mientras la app está abierta (Connect IQ no deja vibrar en
+   segundo plano a una watch-app). Útil si dejas el approver en pantalla; no sirve como
+   aviso pasivo. Pendiente de implementar.
+3. **App compañera Android** (no recomendado en v2): una app/servicio propio que
+   reaccione al broadcast de ntfy (`io.heckel.ntfy.MESSAGE_RECEIVED`) y empuje un aviso
+   propio. Es lo que hacía la tarea de Tasker; aporta poco frente a la opción 1 y añade
+   una pieza más que mantener.
 
 ---
 
@@ -213,6 +237,24 @@ veces**, una por matcher, pasando el tipo como argumento:
 `Stop` ya avisa de que Claude espera; así no llega por duplicado). `permission_prompt`
 avisa siempre, aunque en `bypassPermissions` casi nunca se dispara.
 
+**Fallo por error de API (`StopFailure`).** El hook `stopfailure-notify.sh` avisa
+cuando un turno muere por un error de API (rate limit, sobrecarga, error de
+servidor...). El hook `Stop` **no** dispara en ese caso, ni tampoco en la
+interrupción manual (Esc). Es solo aviso: un único push, sin botones ni espera.
+Regístralo **sin matcher** (captura cualquier tipo de error):
+
+```json
+{ "hooks": { "StopFailure": [
+  { "hooks": [ { "type": "command",
+    "command": "/home/problemas/Documentos/GitHub/dotmesh-watch/bridge/approver/stopfailure-notify.sh" } ] }
+] } }
+```
+
+Avisa **siempre** que haya transporte, esté o no vigilada la sesión (un fallo
+conviene saberlo). Eso sí, el **nombre del proyecto** solo viaja en sesiones
+vigiladas; las demás reciben un aviso genérico, para no filtrar metadatos de las que
+optaste por no espejar.
+
 ## Qué escala a la muñeca (y qué no)
 
 El hook **no** manda push por cada Bash/Write/Edit — eso sería insoportable en
@@ -232,10 +274,11 @@ defecto, así que incluye lo que quieras conservar).
 
 ## Multi-sesión y seguridad
 
-- El `allow`/`deny` **pelado** (el que manda el reloj) casa con *la* petición
-  pendiente. Con **varias sesiones** de Claude compartiendo los mismos topics
-  podrías aprobar la que no es. Solución: un **par de topics por sesión/equipo**, o
-  usa solo los botones del push (que llevan el `id` correlacionado).
+- El **approver nativo** del reloj y los **botones del push** publican
+  `"<id> allow|deny"` **correlacionado por id**, seguro con varias sesiones a la vez.
+  Solo la vía **legada** de Tasker manda un `allow`/`deny` **pelado**, que casa con
+  *cualquier* petición pendiente: con **varias sesiones** compartiendo topics podrías
+  aprobar la que no es. Si usas Tasker, dale un **par de topics por sesión/equipo**.
 - **Fail-safe**: ante config ausente o timeout, el hook devuelve `ask` (decides en
   el terminal), nunca un `allow` mudo.
 - El push **no** lleva contenido de ficheros: `Bash` → comando recortado; `Write`/
