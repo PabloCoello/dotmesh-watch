@@ -14,8 +14,10 @@ Claude (tool-use) ──PreToolUse hook (host)──┐ publica en topic REQ (+ 
 ```
 
 - **Botón en la notificación** (móvil): publica `"<id> allow|deny"` en el topic DEC.
-- **Desde el Garmin**: Tasker publica un `allow`/`deny` "pelado" en el topic DEC
-  (vale con una petición pendiente cada vez; ver "Multi-sesión").
+- **Approver nativo** (reloj, recomendado): publica `"<id> allow|deny"` correlacionado
+  en el topic DEC.
+- **Tasker** (legado, Garmin): publica un `allow`/`deny` "pelado" en el topic DEC (vale
+  con una petición pendiente cada vez; ver "Multi-sesión").
 
 ---
 
@@ -272,10 +274,11 @@ defecto, así que incluye lo que quieras conservar).
 
 ## Multi-sesión y seguridad
 
-- El `allow`/`deny` **pelado** (el que manda el reloj) casa con *la* petición
-  pendiente. Con **varias sesiones** de Claude compartiendo los mismos topics
-  podrías aprobar la que no es. Solución: un **par de topics por sesión/equipo**, o
-  usa solo los botones del push (que llevan el `id` correlacionado).
+- El **approver nativo** del reloj y los **botones del push** publican
+  `"<id> allow|deny"` **correlacionado por id**, seguro con varias sesiones a la vez.
+  Solo la vía **legada** de Tasker manda un `allow`/`deny` **pelado**, que casa con
+  *cualquier* petición pendiente: con **varias sesiones** compartiendo topics podrías
+  aprobar la que no es. Si usas Tasker, dale un **par de topics por sesión/equipo**.
 - **Fail-safe**: ante config ausente o timeout, el hook devuelve `ask` (decides en
   el terminal), nunca un `allow` mudo.
 - El push **no** lleva contenido de ficheros: `Bash` → comando recortado; `Write`/

@@ -10,8 +10,9 @@ using Toybox.PersistedContent;
 // textos de los reprompts son EXACTAMENTE los que manda el bridge del host
 // (lib.sh), así que la muñeca y los botones del push disparan lo mismo.
 class ApproverMenu extends WatchUi.Menu2 {
-    // Ventana de /raw: peticiones publicadas en los últimos 15 min.
-    const POLL_WINDOW = "15m";
+    // Ventana de /raw. Se ciñe al timeout por defecto del host (BRIDGE_TIMEOUT=300s):
+    // más allá, el host ya abandonó la petición y mostrarla solo confunde.
+    const POLL_WINDOW = "5m";
 
     function initialize() {
         Menu2.initialize({ :title => "dotmesh" });
@@ -36,6 +37,13 @@ class ApproverMenu extends WatchUi.Menu2 {
             return;
         }
 
+        // El host guarda la base sin barra final; el reloj concatena base+topic, así
+        // que la exige. La añadimos si falta para no romper la URL del GET.
+        var baseStr = base as Lang.String;
+        if (!baseStr.substring(baseStr.length() - 1, baseStr.length()).equals("/")) {
+            baseStr = baseStr + "/";
+        }
+
         var headers = {};
         if (token != null && !token.equals("")) {
             headers.put("Authorization", "Bearer " + token);
@@ -49,7 +57,7 @@ class ApproverMenu extends WatchUi.Menu2 {
 
         var params = { "poll" => "1", "since" => POLL_WINDOW };
 
-        Communications.makeWebRequest(base + topic + "/raw", params, options, method(:onPoll));
+        Communications.makeWebRequest(baseStr + topic + "/raw", params, options, method(:onPoll));
         WatchUi.showToast("Actualizando…", null);
     }
 
@@ -135,6 +143,9 @@ class ApproverMenuDelegate extends WatchUi.Menu2InputDelegate {
         var rec = Bridge.pending as Lang.Dictionary;
         var pid = rec[:id] as Lang.String;
         send("decTopic", pid + " " + verdict);
+        // Ya decidida: limpia la fila para no re-enviar una decisión obsoleta. La
+        // resolución del host no vuelve por REQ, así que toca Actualizar otra vez.
+        _menu.applyPending([]);
     }
 
     // Publica "message" en el topic configurado, usando el modo publish-as-JSON

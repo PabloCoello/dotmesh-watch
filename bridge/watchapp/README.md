@@ -25,13 +25,19 @@ arregla lo que falle` / `haz commit de los cambios` al topic REP.
 
 El host publica cada petición en el **topic REQ** con un cuerpo que el reloj puede
 partir: `id␟label␟tool␟summary`, con los campos separados por **US (`0x1f`)**. La app lo
-lee con `GET <base><reqTopic>/raw?poll=1&since=15m` en texto plano; ntfy devuelve una
-línea por mensaje de los últimos 15 minutos. El módulo `Bridge` parte la última línea por
-el US y la vuelca en la primera fila del menú: la etiqueta de la sesión como título, la
-herramienta y el resumen debajo. Las líneas **sin US** (reprompts, avisos, preguntas) se
-ignoran, porque no son peticiones de permiso. Si la respuesta llega vacía, la fila queda
-en «(sin petición)»; si es muy grande o hay error de red, la app muestra «Error» con el
-código.
+lee con `GET <base><reqTopic>/raw?poll=1&since=5m` en texto plano; ntfy devuelve una línea
+por mensaje de los últimos 5 minutos (la ventana se ciñe al `BRIDGE_TIMEOUT` por defecto
+del host, 300 s). El módulo `Bridge` parte la última línea por el US y la vuelca en la
+primera fila del menú: la etiqueta de la sesión como título, la herramienta y el resumen
+debajo. Las líneas **sin US** (reprompts, avisos, preguntas) se ignoran, porque no son
+peticiones de permiso. Si la respuesta llega vacía, la fila queda en «(sin petición)»; si
+es muy grande muestra «Respuesta grande», y ante cualquier otro error (red o HTTP) muestra
+«Error» con el código.
+
+La resolución del host **no vuelve** por el topic REQ, así que una petición ya respondida
+por el botón del push, o ya caducada en el host, puede seguir saliendo hasta que pulses
+*Actualizar*. Tras decidir desde el reloj, la fila se limpia sola para no reenviar una
+decisión que ya nadie escucha.
 
 ## Build
 
