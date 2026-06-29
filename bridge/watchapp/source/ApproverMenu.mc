@@ -84,19 +84,20 @@ class ApproverMenu extends WatchUi.Menu2 {
             Bridge.pending = null;
             it.setLabel("(sin petición)");
             it.setSubLabel("nada en " + POLL_WINDOW);
+            Application.Storage.deleteValue("lastPending");
             WatchUi.requestUpdate();
             return;
         }
 
         var rec = records[records.size() - 1] as Lang.Dictionary;
         Bridge.pending = rec;
-        it.setLabel(rec[:label] as Lang.String);
-        var sub = rec[:tool] as Lang.String;
+        var label   = rec[:label] as Lang.String;
+        var tool    = rec[:tool] as Lang.String;
         var summary = rec[:summary] as Lang.String;
-        if (!summary.equals("")) {
-            sub = sub + " — " + summary;
-        }
-        it.setSubLabel(sub);
+        it.setLabel(label);
+        it.setSubLabel(summary.equals("") ? tool : (tool + " — " + summary));
+        // Preview compacto para la tarjeta glance (la lee ApproverGlance).
+        Application.Storage.setValue("lastPending", [label, tool, summary]);
         WatchUi.requestUpdate();
     }
 }

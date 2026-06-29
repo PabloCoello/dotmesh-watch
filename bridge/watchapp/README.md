@@ -101,11 +101,14 @@ que hay algo que decidir llega por la notificación de ntfy reflejada en la muñ
   JSON de CIQ no traga directo.
 - **Respuesta correlacionada por id**: *Aprobar/Denegar* publican `"<id> allow|deny"` en
   vez de un `allow` pelado, para no mezclar sesiones.
+- **Tarjeta glance**: en el carrusel de glances ves la última petición (sesión,
+  herramienta y resumen) sin abrir la app; al tocarla, se abre el menú. Lee un preview de
+  `Application.Storage` que el menú escribe al actualizar, así que refleja la última vez
+  que pulsaste *Actualizar*, no un sondeo en vivo.
 
 ## Pendiente
 
 - Icono propio (ahora reusa el de la esfera).
-- Acceso más rápido (glance/atajo) en vez de abrir la app.
 - Vibración propia al llegar una petición; las opciones reales están en
   [`../SETUP.md`](../SETUP.md), en «Aviso en la muñeca».
 - Picker cuando hay varias sesiones pendientes a la vez (hoy se resuelve la última).
