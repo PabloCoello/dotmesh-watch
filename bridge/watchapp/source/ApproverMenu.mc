@@ -124,7 +124,17 @@ class ApproverMenuDelegate extends WatchUi.Menu2InputDelegate {
             send("repTopic", "ejecuta los tests y arregla lo que falle");
         } else if (id == :commit) {
             send("repTopic", "haz commit de los cambios");
-        } else if (id == :refresh || id == :pending) {
+        } else if (id == :pending) {
+            // Toca la petición: si hay una pendiente, abre el detalle (texto
+            // completo con scroll); si no, refresca como "Actualizar".
+            if (Bridge.pending != null) {
+                var rec = Bridge.pending as Lang.Dictionary;
+                var v = new RequestDetailView(rec[:label], rec[:tool], rec[:summary]);
+                WatchUi.pushView(v, new RequestDetailDelegate(v), WatchUi.SLIDE_LEFT);
+            } else {
+                _menu.refresh();
+            }
+        } else if (id == :refresh) {
             _menu.refresh();
         }
     }
